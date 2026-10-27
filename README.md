@@ -42,6 +42,10 @@ flutter run
 flutter test
 ```
 
+> Если `flutter` не может достучаться до pub.dev (`Got socket error`,
+> `Unable to 'pub upgrade' flutter tool`) — пошаговое лечение для Windows/RU:
+> [docs/WINDOWS_SETUP_RU.md](docs/WINDOWS_SETUP_RU.md).
+
 ### Разрешения, которые нужно добавить в платформенные проекты
 
 **Android** (`android/app/src/main/AndroidManifest.xml`):
