@@ -64,9 +64,12 @@ class _TodayHeaderState extends ConsumerState<TodayHeader> {
         if (v < -200) setState(() => _expanded = true);
         if (v > 200) setState(() => _expanded = false);
       },
-      child: AnimatedContainer(
+      child: AnimatedSize(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
+        // AnimatedSize анимирует смену размеров сам: анимация constraints
+        // невозможна (конечный maxHeight нельзя интерполировать с бесконечным).
+        child: Container(
         // В свёрнутом виде карточка сама растёт под содержимое (минимум 15%),
         // ничего не обрезается; в развёрнутом — фиксированная высота со скроллом.
         constraints: _expanded
@@ -182,6 +185,7 @@ class _TodayHeaderState extends ConsumerState<TodayHeader> {
               ],
             ],
           ),
+        ),
         ),
       ),
     );
