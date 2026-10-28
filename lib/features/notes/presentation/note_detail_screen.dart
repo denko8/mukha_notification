@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -14,7 +15,6 @@ import '../../../core/utils/date_parser.dart';
 import '../../../core/utils/highlighted_text.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
-import '../state/notes_notifier.dart';
 import 'note_edit_screen.dart';
 
 class NoteDetailScreen extends ConsumerWidget {
@@ -55,7 +55,8 @@ class NoteDetailScreen extends ConsumerWidget {
           pw.Header(
             level: 0,
             child: pw.Text('Smart Notes — заметка',
-                style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                style: const pw.TextStyle(
+                    fontSize: 20, fontWeight: pw.FontWeight.bold)),
           ),
           pw.SizedBox(height: 12),
           pw.Text(note.text, style: const pw.TextStyle(fontSize: 14)),
@@ -274,7 +275,7 @@ class _AttachmentTile extends StatelessWidget {
             subtitle: const Text('PDF-документ'),
             trailing: TextButton(
               child: const Text('Открыть'),
-              onPressed: () => Printing.openPdfFile(attachment.path),
+              onPressed: () => OpenFilex.open(attachment.path),
             ),
           ),
         );

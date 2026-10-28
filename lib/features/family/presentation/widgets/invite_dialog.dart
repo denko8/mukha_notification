@@ -6,7 +6,6 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../../../app/providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../models/family_member.dart';
-import '../../state/family_notifier.dart';
 
 /// Диалог приглашения: уникальная ссылка + QR-код (раздел 2.2 ТЗ).
 class InviteDialog extends ConsumerStatefulWidget {

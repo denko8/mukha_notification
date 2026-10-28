@@ -5,7 +5,6 @@ import '../../../app/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_parser.dart';
 import '../models/note.dart';
-import '../state/notes_notifier.dart';
 
 class NoteEditScreen extends ConsumerStatefulWidget {
   final String noteId;

@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../app/providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../models/note.dart';
-import '../../state/notes_notifier.dart';
 import 'note_card.dart';
 
 /// Лента заметок: новые карточки выезжают (300ms ease-in-out),

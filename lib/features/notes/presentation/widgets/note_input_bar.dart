@@ -8,7 +8,6 @@ import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
 import '../../models/note_attachment.dart';
-import '../../state/notes_notifier.dart';
 import '../../utils/attachment_picker.dart';
 
 /// Центральная строка ввода (раздел 2.1 ТЗ).
