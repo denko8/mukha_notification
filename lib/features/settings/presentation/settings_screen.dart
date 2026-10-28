@@ -262,16 +262,27 @@ class _Section extends StatelessWidget {
             padding: const EdgeInsets.only(left: 4, bottom: 8),
             child: Text(title, style: theme.textTheme.titleLarge),
           ),
+          // Тень — на внешнем Container, фон — на Material: иначе
+          // DecoratedBox перекрыл бы чернильные сплэши вложенных ListTile
+          // (assert «ListTile background color or ink splashes may be
+          // invisible»).
           Container(
-            decoration: BoxDecoration(
-              color: theme.cardTheme.color,
-              borderRadius: BorderRadius.circular(AppColors.radiusCard),
-              boxShadow: const [
-                BoxShadow(color: AppColors.shadow, blurRadius: 8, offset: Offset(0, 2)),
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.all(
+                Radius.circular(AppColors.radiusCard),
+              ),
+              boxShadow: [
+                BoxShadow(
+                    color: AppColors.shadow,
+                    blurRadius: 8,
+                    offset: Offset(0, 2)),
               ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppColors.radiusCard),
+            child: Material(
+              color: theme.cardTheme.color,
+              borderRadius:
+                  BorderRadius.circular(AppColors.radiusCard),
+              clipBehavior: Clip.antiAlias,
               child: child,
             ),
           ),
