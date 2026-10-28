@@ -167,7 +167,10 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
         duration: Duration(seconds: 1),
       ),
     );
-    _focusNode.requestFocus();
+    // Клавиатура закрывается после отправки: снимаем фокус с поля.
+    // Действует и для ручной отправки, и для авто-сохранения голосом —
+    // оба пути сохраняются через _save().
+    _focusNode.unfocus();
   }
 
   Future<void> _toggleVoice() async {
