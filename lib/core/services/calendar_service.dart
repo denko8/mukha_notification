@@ -25,5 +25,5 @@ class CalendarService {
   }
 
   static String _fmt(DateTime d) =>
-      d.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first + 'Z';
+      '${d.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first}Z';
 }

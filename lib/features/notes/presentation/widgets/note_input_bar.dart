@@ -110,9 +110,10 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       if (mounted) setState(() => _listening = false);
       return;
     }
+    final messenger = ScaffoldMessenger.of(context);
     final available = await voice.ensureAvailable();
     if (!available || !mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(
           content: Text('Голосовой ввод недоступен: проверьте разрешение на микрофон'),
         ),

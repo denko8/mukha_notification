@@ -21,7 +21,9 @@ class MlKitOcrService implements OcrService {
     if (kIsWeb) {
       throw OcrUnsupportedException('OCR работает только в Android/iOS приложении');
     }
-    final recognizer = TextRecognizer(script: TextRecognitionScript.cyrillic);
+    // В ML Kit отдельной кириллической модели нет: латинский распознаватель
+    // поддерживает и кириллицу (русский текст распознаётся корректно).
+    final recognizer = TextRecognizer(script: TextRecognitionScript.latin);
     try {
       final input = InputImage.fromFilePath(imagePath);
       final result = await recognizer.processImage(input);

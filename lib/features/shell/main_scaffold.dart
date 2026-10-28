@@ -37,7 +37,7 @@ class _MainScaffoldState extends State<MainScaffold> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.info_outline, size: 14, color: AppColors.gold),
-                    SizedBox(width: 6),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: Text(
                         'Web-превью: данные хранятся в памяти вкладки и сбросятся '

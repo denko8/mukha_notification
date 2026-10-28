@@ -12,3 +12,6 @@ analyzer:
   exclude:
     - "build/**"
     - ".dart_tool/**"
+    # Справочные реализации Firebase подключаются после flutterfire configure
+    # и намеренно не компилируются без firebase-зависимостей в проекте.
+    - "docs/firebase/**"

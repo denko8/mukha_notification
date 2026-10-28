@@ -41,10 +41,13 @@ class SpeechToTextVoiceService implements VoiceInputService {
     }
     await _speech.listen(
       onResult: (result) => onText(result.recognizedWords),
-      listenFor: const Duration(minutes: 1),
-      pauseFor: const Duration(seconds: 5),
-      localeId: localeId,
-      onSoundLevelChange: null,
+      // В speech_to_text 7.x listenFor/pauseFor/localeId переехали
+      // из аргументов listen() в SpeechListenOptions.
+      listenOptions: SpeechListenOptions(
+        listenFor: const Duration(minutes: 1),
+        pauseFor: const Duration(seconds: 5),
+        localeId: localeId,
+      ),
     );
     _speech.statusListener = (status) =>
         onStatus(status == SpeechToText.listeningStatus);
