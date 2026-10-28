@@ -88,14 +88,14 @@ class VoiceModelService extends StateNotifier<VoiceModelState> {
     return Directory(p.join(docs.path, 'models'));
   }
 
-  Future<Directory> _modelDir() async =>
-      Directory(p.join((await _modelsDir()).path, modelName));
-
   /// Синхронизирует состояние с файловой системой (вызывается на старте).
   Future<void> checkExisting() async {
     try {
-      final dir = await _modelDir();
-      if (dir.existsSync() && dir.listSync().isNotEmpty) {
+      final modelsDir = await _modelsDir();
+      // Только каталог с реальной структурой Vosk (am/conf/graph)
+      // считается готовой моделью — пустой огрызок прошлой попытки нет.
+      final dir = _findModelDir(modelsDir);
+      if (dir != null) {
         state = VoiceModelState(
           phase: VoiceModelPhase.ready,
           progress: 1,
@@ -125,48 +125,30 @@ class VoiceModelService extends StateNotifier<VoiceModelState> {
         modelsDir.createSync(recursive: true);
       }
       zipFile = File(p.join(modelsDir.path, '$modelName.zip'));
-      if (zipFile.existsSync()) zipFile.deleteSync();
-
-      state = const VoiceModelState(phase: VoiceModelPhase.downloading);
       client = http.Client();
-      final request = http.Request('GET', Uri.parse(modelUrl));
-      final response = await client.send(request);
-      if (response.statusCode != 200) {
-        throw HttpException(
-          'сервер вернул ${response.statusCode} при загрузке модели',
-        );
-      }
 
-      final total = response.contentLength ?? 0;
-      var received = 0;
-      final sink = zipFile.openWrite();
-      try {
-        await for (final chunk in response.stream) {
-          sink.add(chunk);
-          received += chunk.length;
-          state = state.copyWith(
-            phase: VoiceModelPhase.downloading,
-            receivedBytes: received,
-            totalBytes: total,
-            progress: total > 0 ? received / total : 0,
-          );
-        }
-      } finally {
-        await sink.flush();
-        await sink.close();
-      }
-      debugPrint('[VOSK] архив скачан: ${zipFile.path} ($received байт)');
+      // Если zip уже полностью скачан (например, прошлая попытка упала
+      // на этапе распаковки), не качаем 46 МБ повторно.
+      final total = await _downloadIfNeeded(client, zipFile);
+      final received = zipFile.lengthSync();
+      debugPrint('[VOSK] архив готов: ${zipFile.path} ($received байт)');
 
       state = state.copyWith(phase: VoiceModelPhase.extracting);
       final zipPath = zipFile.path;
       final outPath = modelsDir.path;
       // Распаковка в отдельном изоляте: 45 МБ zip не должны морозить UI.
-      await Isolate.run(() => _extractZip(zipPath, outPath));
+      final extracted = await Isolate.run(() => _extractZip(zipPath, outPath));
+      debugPrint('[VOSK] распаковано записей: $extracted');
+      debugPrint(
+        '[VOSK] содержимое $outPath: '
+        '${modelsDir.listSync().map((e) => p.basename(e.path)).toList()}',
+      );
 
-      final modelDir = Directory(p.join(outPath, modelName));
-      if (!modelDir.existsSync() || modelDir.listSync().isEmpty) {
+      final modelDir = _findModelDir(modelsDir);
+      if (modelDir == null) {
         throw const FileSystemException(
-          'после распаковки каталог модели пуст или отсутствует',
+          'после распаковки каталог модели не найден '
+          '(ожидаются подкаталоги am/conf/graph)',
         );
       }
 
@@ -181,9 +163,9 @@ class VoiceModelService extends StateNotifier<VoiceModelState> {
       debugPrint('[VOSK] модель готова: ${modelDir.path}');
     } catch (e) {
       debugPrint('[VOSK] загрузка модели не удалась: $e');
-      try {
-        zipFile?.deleteSync();
-      } catch (_) {/* zip мог не создаться */}
+      // zip намеренно НЕ удаляем: если он скачан полностью, повторная
+      // попытка переиспользует его и сразу перейдёт к распаковке.
+      // Неполный/битый архив отбракует _downloadIfNeeded по размеру.
       state = VoiceModelState(
         phase: VoiceModelPhase.error,
         error: '$e',
@@ -193,10 +175,110 @@ class VoiceModelService extends StateNotifier<VoiceModelState> {
     }
   }
 
+  /// Качает архив с прогрессом, либо переиспользует уже скачанный
+  /// полный zip. Возвращает ожидаемый общий размер в байтах.
+  Future<int> _downloadIfNeeded(http.Client client, File zipFile) async {
+    // HEAD: ожидаемый размер для проверки полноты локального архива.
+    int? expectedSize;
+    try {
+      final head = await client.head(Uri.parse(modelUrl));
+      expectedSize = int.tryParse(head.headers['content-length'] ?? '');
+    } catch (e) {
+      debugPrint('[VOSK] HEAD не удался: $e, проверю zip-сигнатурой');
+    }
+
+    if (zipFile.existsSync() && zipFile.lengthSync() > 0) {
+      final size = zipFile.lengthSync();
+      final sizeOk = expectedSize == null || size == expectedSize;
+      var sigOk = expectedSize == null;
+      if (!sigOk) {
+        final raf = zipFile.openSync();
+        try {
+          final sig = raf.readSync(4);
+          sigOk = sig.length == 4 &&
+              sig[0] == 0x50 && // P
+              sig[1] == 0x4B && // K
+              sig[2] == 0x03 &&
+              sig[3] == 0x04;
+        } finally {
+          raf.closeSync();
+        }
+      }
+      if (sizeOk && sigOk) {
+        debugPrint('[VOSK] zip уже скачан ($size байт), распаковываю');
+        state = state.copyWith(
+          phase: VoiceModelPhase.downloading,
+          progress: 1,
+          receivedBytes: size,
+          totalBytes: expectedSize ?? size,
+        );
+        return expectedSize ?? size;
+      }
+      debugPrint('[VOSK] локальный zip неполный, удаляю и качаю заново');
+      zipFile.deleteSync();
+    }
+
+    state = const VoiceModelState(phase: VoiceModelPhase.downloading);
+    final request = http.Request('GET', Uri.parse(modelUrl));
+    final response = await client.send(request);
+    if (response.statusCode != 200) {
+      throw HttpException(
+        'сервер вернул ${response.statusCode} при загрузке модели',
+      );
+    }
+
+    final total = response.contentLength ?? expectedSize ?? 0;
+    var received = 0;
+    final sink = zipFile.openWrite();
+    try {
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        state = state.copyWith(
+          phase: VoiceModelPhase.downloading,
+          receivedBytes: received,
+          totalBytes: total,
+          progress: total > 0 ? received / total : 0,
+        );
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+    return total;
+  }
+
   /// Точка входа для изолята: decode + extractArchiveToDisk.
-  static void _extractZip(String zipPath, String outPath) {
-    final bytes = File(zipPath).readAsBytesSync();
+  ///
+  /// ВАЖНО: функция асинхронная и возвращает Future — иначе
+  /// [Isolate.run] завершает изолят сразу после синхронного старта
+  /// extractArchiveToDisk, обрывая запись файлов (распаковка давала
+  /// пустой каталог). Возвращаем число извлечённых файлов для лога.
+  static Future<int> _extractZip(String zipPath, String outPath) async {
+    final bytes = await File(zipPath).readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
-    extractArchiveToDisk(archive, outPath);
+    debugPrint('[VOSK] файлов в архиве: ${archive.files.length}');
+    await extractArchiveToDisk(archive, outPath);
+    return archive.files.length;
+  }
+
+  /// Ищет распакованный каталог модели: сначала по ожидаемому имени,
+  /// затем по характерным подкаталогам Vosk (am/conf/graph) — на случай
+  /// иной структуры архива.
+  static Directory? _findModelDir(Directory modelsDir) {
+    final direct = Directory(p.join(modelsDir.path, modelName));
+    if (_looksLikeModel(direct)) return direct;
+    if (!modelsDir.existsSync()) return null;
+    for (final entity in modelsDir.listSync()) {
+      if (entity is Directory && _looksLikeModel(entity)) return entity;
+    }
+    return null;
+  }
+
+  static bool _looksLikeModel(Directory dir) {
+    if (!dir.existsSync()) return false;
+    bool has(String name) => Directory(p.join(dir.path, name)).existsSync();
+    // У моделей Vosk обязательно есть conf и хотя бы один из am/graph.
+    return has('conf') && (has('am') || has('graph'));
   }
 }
