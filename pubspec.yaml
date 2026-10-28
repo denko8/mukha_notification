@@ -37,7 +37,8 @@ dependencies:
   # использовании и в APK не упакована — приложение остаётся лёгким.
   vosk_flutter: ^0.3.48
   archive: ^3.6.1                 # распаковка zip модели
-  permission_handler: ^11.3.1     # запрос доступа к микрофону
+  # 10.x, а не 11.x: опубликованный vosk_flutter 0.3.48 требует ^10.2.0
+  permission_handler: ^10.2.0    # запрос доступа к микрофону
   audioplayers: ^6.1.0            # плеер аудиовложений
   url_launcher: ^6.3.1            # открытие ссылок/календаря
   google_mlkit_text_recognition: ^0.15.0  # OCR (мобильные)
