@@ -186,7 +186,7 @@ void main() {
 
   group('AiClientFactory', () {
     test('собирает клиента под каждого провайдера', () {
-      final yandex = const AppSettings(
+      const yandex = AppSettings(
         aiEnabled: true,
         aiProvider: 'yandexGpt',
         aiApiKey: 'key',
@@ -195,7 +195,7 @@ void main() {
       expect(AiClientFactory.build(yandex), isA<YandexGptClient>());
       expect(AiClientFactory.isConfigured(yandex), isTrue);
 
-      final giga = const AppSettings(
+      const giga = AppSettings(
         aiEnabled: true,
         aiProvider: 'gigaChat',
         gigaChatAuthKey: 'basic',
@@ -203,7 +203,7 @@ void main() {
       expect(AiClientFactory.build(giga), isA<GigaChatClient>());
       expect(AiClientFactory.isConfigured(giga), isTrue);
 
-      final openai = const AppSettings(
+      const openai = AppSettings(
         aiEnabled: true,
         aiApiKey: 'sk',
         aiBaseUrl: 'https://example.com/v1',
@@ -228,7 +228,7 @@ void main() {
     });
 
     test('неизвестное имя провайдера не валит фабрику', () {
-      final s = const AppSettings(
+      const s = AppSettings(
         aiEnabled: true,
         aiProvider: 'mystery',
         aiApiKey: 'sk',

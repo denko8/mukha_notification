@@ -78,7 +78,7 @@ class YandexGptClient implements ChatCompletionClient {
       throw LlmResponseException('YandexGPT: пустой alternatives');
     }
     final text = (alternatives.first
-        as Map<String, dynamic>)?['message']?['text'];
+        as Map<String, dynamic>)['message']?['text'];
     if (text is! String || text.trim().isEmpty) {
       throw LlmResponseException('YandexGPT: пустой текст ответа');
     }

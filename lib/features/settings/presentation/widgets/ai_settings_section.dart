@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../ai/ai_connection_service.dart';
 import '../../../ai/llm/ai_provider.dart';
 import '../../models/app_settings.dart';
+import '../../state/settings_notifier.dart';
 
 /// Настройки облачного ИИ: выбор провайдера (YandexGPT/GigaChat/OpenAI-совм.),
 /// динамические поля и проверка подключения.
