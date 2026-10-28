@@ -53,45 +53,57 @@ class SpeechToTextVoiceService implements VoiceInputService {
   Future<VoiceCheckResult> ensureAvailable() async {
     if (_initialized) return VoiceCheckResult.okResult;
     try {
-      // Заранее проверяем разрешение: на части прошивок initialize()
-      // возвращает false без внятной ошибки, и так мы хотя бы отличим
-      // отказ в доступе от отсутствия сервиса распознавания.
-      try {
-        final hasPermission = await _speech.hasPermission;
-        if (hasPermission == false) {
-          return const VoiceCheckResult(VoiceAvailability.permissionDenied);
-        }
-      } catch (_) {
-        // hasPermission поддерживается не на всех платформах — не мешаем
-        // инициализации, решение примет сам initialize().
-      }
-
+      // ВАЖНО: нельзя пре-чекать hasPermission и выходить до initialize() —
+      // на первом запуске разрешение ещё не запрашивалось, hasPermission
+      // вернёт false, а системный диалог показывает именно initialize().
+      // Поэтому всегда даём инициализации отработать, причину сбоя
+      // разбираем после.
       _lastError = null;
       final ok = await _speech.initialize(
         onError: (error) =>
             _lastError = '${error.errorMsg} (permanent=${error.permanent})',
       );
-      if (!ok) {
-        if (_lastError != null &&
-            _lastError!.toLowerCase().contains('permission')) {
-          return VoiceCheckResult(
-            VoiceAvailability.permissionDenied,
-            technicalDetails: _lastError,
-          );
-        }
-        return VoiceCheckResult(
-          VoiceAvailability.noRecognitionService,
-          technicalDetails: _lastError,
-        );
+      if (ok) {
+        _initialized = true;
+        return VoiceCheckResult.okResult;
       }
-      _initialized = true;
-      return VoiceCheckResult.okResult;
+      return _classifyFailure();
     } catch (e) {
       return VoiceCheckResult(
         VoiceAvailability.unavailable,
         technicalDetails: '$e',
       );
     }
+  }
+
+  /// Различает отказ в разрешении и отсутствие сервиса распознавания
+  /// после неуспешной инициализации.
+  Future<VoiceCheckResult> _classifyFailure() async {
+    final error = _lastError?.toLowerCase() ?? '';
+    if (error.contains('permission') ||
+        error.contains('audio') ||
+        error.contains('recorder')) {
+      return VoiceCheckResult(
+        VoiceAvailability.permissionDenied,
+        technicalDetails: _lastError,
+      );
+    }
+    bool? granted;
+    try {
+      granted = await _speech.hasPermission;
+    } catch (_) {
+      granted = null;
+    }
+    if (granted == false) {
+      return VoiceCheckResult(
+        VoiceAvailability.permissionDenied,
+        technicalDetails: _lastError,
+      );
+    }
+    return VoiceCheckResult(
+      VoiceAvailability.noRecognitionService,
+      technicalDetails: _lastError,
+    );
   }
 
   @override

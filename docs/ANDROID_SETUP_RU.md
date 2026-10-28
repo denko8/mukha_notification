@@ -303,19 +303,45 @@ applications that depend on it to compile against version 36 or later.
 
 В `AndroidManifest.xml` обязательно должны быть и разрешение, и блок
 `<queries>` — на Android 11+ без него приложение «не видит» сервис
-распознавания, даже если он установлен:
+распознавания, даже если он установлен. Дефолтный `PROCESS_TEXT`
+от Flutter при этом сохраняем — он нужен другому плагину. Готовый
+манифест целиком (разрешения над `<application>`, объединённые queries):
 
 ```xml
-<uses-permission android:name="android.permission.RECORD_AUDIO"/>
-<queries>
-    <intent>
-        <action android:name="android.speech.RecognitionService" />
-    </intent>
-</queries>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <application ...> ... </application>
+
+    <queries>
+        <!-- системный сервис распознавания речи для speech_to_text -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <!-- дефолтный запрос Flutter (ProcessTextPlugin), не удалять -->
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>
 ```
 
-После правки манифеста — переустановить приложение (`flutter run`
-заново), разрешение на микрофон выдаётся при первом нажатии на кнопку.
+После правки манифеста — полностью переустановить приложение
+(`flutter run` заново, hot reload манифест не подхватывает).
+
+Почему в настройках телефона нет пункта «Микрофон»: vivo (Funtouch OS)
+показывает разрешение в списке только после первого runtime-запроса,
+а запрос делает `SpeechToText.initialize()` при тапе по кнопке. Если
+инициализация падает раньше (не виден сервис речи из-за отсутствия
+`<queries>`), диалог не показывается и пункт не появляется — поэтому
+важен именно порядок: сначала манифест, потом тап по микрофону.
 
 ### 10.2. Системный сервис распознавания речи
 
