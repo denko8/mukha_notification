@@ -326,17 +326,125 @@ dependencyResolutionManagement {
 `repositories { maven { url 'https://alphacephei.com/maven/' } }`.
 После правки — `flutter clean && flutter run`.
 
-Размер APK вырастет за счёт нативных библиотек (libvosk, JNA) под все
-ABI. Для релизной сборки используйте App Bundle (`.aab`) — на каждое
-устройство ставятся библиотеки только его архитектуры; либо ограничьте
-ABI в `android/app/build.gradle.kts`:
+### 10.1.1. Ошибка «Namespace not specified» у vosk_flutter (AGP 8+)
+
+Симптом при сборке:
+
+```
+A problem occurred configuring project ':vosk_flutter'.
+> Could not create an instance of type ...LibraryVariantBuilderImpl.
+  > Namespace not specified. Specify a namespace in the module's build
+    file ...vosk_flutter-0.3.48\android\build.gradle
+```
+
+Причина: опубликованный `vosk_flutter 0.3.48` написан под AGP 4–7
+(в master namespace уже добавлен, но новый релиз на pub.dev не
+выложен), а у вас AGP 8+ (compileSdk 36, Gradle 9). AGP 8 не умеет
+брать namespace из атрибута `package` манифеста — его нужно
+проставить в Gradle. Чинить файлы в pub-кэше руками нельзя:
+`flutter pub get`/`cache repair` их перезапишет. Решение — тот же
+**корневой `android/build.gradle.kts`**, где уже стоит блок из
+раздела 3.3 (JVM 17, compileSdk 36). Дополните его `afterEvaluate`
+инъекцией namespace (KTS):
 
 ```kotlin
-android {
-    defaultConfig {
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+subprojects {
+    // Срабатывает после оценки каждого модуля, но регистрируется здесь,
+    // в начале корневого файла — поэтому опережает и заморозку AGP,
+    // и собственные compileOptions плагинов.
+    afterEvaluate {
+        val androidExt =
+            extensions.findByName("android") as? com.android.build.gradle.BaseExtension
+        if (androidExt != null) {
+            androidExt.compileSdkVersion(36)
+            androidExt.compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+
+        // === добавить ЭТУ ЧАСТЬ — namespace легаси-плагинов (AGP 8+) ===
+        if (plugins.hasPlugin("com.android.library")) {
+            extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+                if (namespace == null) {
+                    val manifestFile =
+                        sourceSets.getByName("main").manifest.srcFile
+                    val original = manifestFile.readText()
+                    val pkg = Regex("""package="([^"]+)"""").find(original)
+                        ?.groupValues?.get(1)
+                    if (pkg != null) {
+                        namespace = pkg
+                        // AGP 8 в части версий дополнительно ругается на
+                        // сам атрибут package в манифесте библиотеки —
+                        // удаляем его; R-класс плагина сохраняет пакет
+                        // org.vosk.vosk_flutter через namespace.
+                        manifestFile.writeText(
+                            original.replace(
+                                Regex("""\s*package="[^"]+""""),
+                                "",
+                            ),
+                            Charsets.UTF_8,
+                        )
+                    }
+                }
+            }
+        }
+        // === конец добавки ===
+
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java)
+            .configureEach {
+                compilerOptions {
+                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+                }
+            }
     }
 }
+```
+
+Groovy-вариант (тот же модуль, `android/build.gradle`):
+
+```gradle
+subprojects {
+    afterEvaluate {
+        def androidExt = extensions.findByName('android')
+        if (androidExt != null) {
+            androidExt.compileSdkVersion(36)
+            androidExt.compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+        }
+        if (plugins.hasPlugin('com.android.library')) {
+            extensions.configure('android') { android ->
+                if (android.namespace == null) {
+                    def manifestFile = android.sourceSets.main.manifest.srcFile
+                    def original = manifestFile.getText('UTF-8')
+                    def matcher = (original =~ /package="([^"]+)"/)
+                    if (matcher.find()) {
+                        android.namespace = matcher.group(1)
+                        manifestFile.write(
+                            original.replaceAll(/\s*package="[^"]+"/, ''),
+                            'UTF-8',
+                        )
+                    }
+                }
+            }
+        }
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions { jvmTarget = '17' }
+        }
+    }
+}
+```
+
+Блок универсален: сработает для любого плагина без namespace, а не
+только для Vosk. Правка манифеста в pub-кэше происходит на этапе
+конфигурации и повторяется при каждой сборке, поэтому переживает
+`flutter pub get` и переустановку пакетов. После правки:
+
+```
+flutter clean
+flutter run
 ```
 
 ### 10.2. Манифест (раздел 3.1)
