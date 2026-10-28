@@ -1,8 +1,23 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
+
+/// Снимок состояния системных разрешений на уведомления —
+/// для экрана самодиагностики в настройках.
+class NotificationDiagnostics {
+  final bool notificationsAllowed;
+  final bool exactAlarmsAllowed;
+  final int pendingCount;
+
+  const NotificationDiagnostics({
+    required this.notificationsAllowed,
+    required this.exactAlarmsAllowed,
+    required this.pendingCount,
+  });
+}
 
 /// Абстракция над доставкой напоминаний.
 /// Сегодня — локальные уведомления, завтра — FCM (раздел 3.1 ТЗ)
@@ -20,7 +35,18 @@ abstract class NotificationService {
   Future<void> cancel(int id);
 
   Future<void> cancelAll();
+
+  /// Диагностика разрешений и очереди ожидающих уведомлений.
+  Future<NotificationDiagnostics> diagnose();
+
+  /// Тестовое уведомление через [delay] секунд — проверка канала
+  /// и настроек прошивки без создания заметки.
+  Future<void> scheduleTest({Duration delay = const Duration(seconds: 10)});
 }
+
+/// Id тестового уведомления: заметки используют hashCode uuid,
+/// берём заведомо редкое положительное значение.
+const int _testNotificationId = 2147483000;
 
 class LocalNotificationService implements NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
@@ -35,8 +61,10 @@ class LocalNotificationService implements NotificationService {
       // В flutter_timezone 3.x метод статический.
       final name = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(name));
-    } catch (_) {
+      debugPrint('[NOTIFY] таймзона: $name');
+    } catch (e) {
       // Если системную зону определить не удалось — остаёмся на UTC.
+      debugPrint('[NOTIFY] таймзону определить не удалось: $e');
     }
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -53,10 +81,13 @@ class LocalNotificationService implements NotificationService {
     final androidPlugin = _plugin
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
-    await androidPlugin?.requestNotificationsPermission();
+    final notifications =
+        await androidPlugin?.requestNotificationsPermission();
+    debugPrint('[NOTIFY] разрешение на уведомления: $notifications');
     // Android 12+: право на точные будильники. На части прошивок
     // (vivo/OPPO/Xiaomi) выдаётся через системный экран настроек.
-    await androidPlugin?.requestExactAlarmsPermission();
+    final exact = await androidPlugin?.requestExactAlarmsPermission();
+    debugPrint('[NOTIFY] разрешение на точные будильники: $exact');
     _ready = true;
   }
 
@@ -69,7 +100,10 @@ class LocalNotificationService implements NotificationService {
   }) async {
     if (!_ready) await init();
     // Напоминание на прошедшее время не планируем.
-    if (!when.isAfter(DateTime.now())) return;
+    if (!when.isAfter(DateTime.now())) {
+      debugPrint('[NOTIFY] пропуск id=$id: время $when уже прошло');
+      return;
+    }
 
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -84,6 +118,10 @@ class LocalNotificationService implements NotificationService {
       iOS: const DarwinNotificationDetails(),
     );
     final tzWhen = tz.TZDateTime.from(when, tz.local);
+    debugPrint(
+      '[NOTIFY] план id=$id на $when (tz=${tz.local.name}), '
+      'через ${when.difference(DateTime.now()).inSeconds}с',
+    );
 
     // Сначала пробуем точный будильник; если прошивка не дала право
     // (SecurityException/PlatformException на части китайских ROM),
@@ -100,7 +138,10 @@ class LocalNotificationService implements NotificationService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
-    } on PlatformException {
+      debugPrint('[NOTIFY] id=$id запланирован точным будильником');
+    } on PlatformException catch (e) {
+      debugPrint('[NOTIFY] точный будильник отклонён (${e.code}), '
+          'перехожу на inexact');
       await _plugin.zonedSchedule(
         id,
         title,
@@ -111,6 +152,7 @@ class LocalNotificationService implements NotificationService {
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
       );
+      debugPrint('[NOTIFY] id=$id запланирован неточным будильником');
     }
   }
 
@@ -119,9 +161,44 @@ class LocalNotificationService implements NotificationService {
 
   @override
   Future<void> cancelAll() => _plugin.cancelAll();
+
+  @override
+  Future<NotificationDiagnostics> diagnose() async {
+    if (!_ready) await init();
+    final androidPlugin = _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    final notifications =
+        (await androidPlugin?.areNotificationsEnabled()) ?? false;
+    final exact =
+        (await androidPlugin?.canScheduleExactNotifications()) ?? false;
+    final pending = await _plugin.pendingNotificationRequests();
+    final result = NotificationDiagnostics(
+      notificationsAllowed: notifications,
+      exactAlarmsAllowed: exact,
+      pendingCount: pending.length,
+    );
+    debugPrint(
+      '[NOTIFY] диагностика: уведомления=$notifications, '
+      'точные=$exact, в очереди=${pending.length}',
+    );
+    return result;
+  }
+
+  @override
+  Future<void> scheduleTest({
+    Duration delay = const Duration(seconds: 10),
+  }) async {
+    await schedule(
+      id: _testNotificationId,
+      title: 'Проверка Smart Notes',
+      body: 'Если вы видите это уведомление — напоминания работают.',
+      when: DateTime.now().add(delay),
+    );
+  }
 }
 
-/// Заглушка для тестов: ничего не планирует.
+/// Заглушка для тестов и web: ничего не планирует.
 class NoopNotificationService implements NotificationService {
   final List<int> scheduled = [];
   final List<int> cancelled = [];
@@ -140,4 +217,19 @@ class NoopNotificationService implements NotificationService {
   Future<void> cancel(int id) async => cancelled.add(id);
   @override
   Future<void> cancelAll() async {}
+
+  @override
+  Future<NotificationDiagnostics> diagnose() async =>
+      const NotificationDiagnostics(
+        notificationsAllowed: true,
+        exactAlarmsAllowed: true,
+        pendingCount: 0,
+      );
+
+  @override
+  Future<void> scheduleTest({
+    Duration delay = const Duration(seconds: 10),
+  }) async {
+    scheduled.add(_testNotificationId);
+  }
 }

@@ -18,6 +18,7 @@ dependencies:
 
   # Storage / utils
   path_provider: ^2.1.3
+  path: ^1.9.0
   intl: ^0.20.3
   uuid: ^4.4.0
 
@@ -31,7 +32,12 @@ dependencies:
   file_picker: ^8.0.6
 
   # P2/P3 features
-  speech_to_text: ^7.0.0          # голосовой ввод
+  # Голосовой ввод — полностью офлайн на встроенной Vosk-модели.
+  # Модель русского (~45 МБ) скачивается один раз при первом
+  # использовании и в APK не упакована — приложение остаётся лёгким.
+  vosk_flutter: ^0.3.48
+  archive: ^3.6.1                 # распаковка zip модели
+  permission_handler: ^11.3.1     # запрос доступа к микрофону
   audioplayers: ^6.1.0            # плеер аудиовложений
   url_launcher: ^6.3.1            # открытие ссылок/календаря
   google_mlkit_text_recognition: ^0.15.0  # OCR (мобильные)

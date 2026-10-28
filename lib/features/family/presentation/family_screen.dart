@@ -41,28 +41,50 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final members = ref.watch(familyNotifierProvider).valueOrNull ?? [];
     final notes = ref.watch(notesNotifierProvider).valueOrNull ?? [];
     final authorFilter = ref.watch(familyAuthorFilterProvider);
 
     var familyNotes = notes.where((n) => n.isFamily).toList();
     if (authorFilter != null) {
-      familyNotes = familyNotes.where((n) => n.authorId == authorFilter).toList();
+      familyNotes =
+          familyNotes.where((n) => n.authorId == authorFilter).toList();
     }
 
     return SafeArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Лёгкая шапка: мелкий muted-заголовок + текстовая кнопка
+          // вместо крупного ElevatedButton.
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 10, 8, 0),
             child: Row(
               children: [
-                Text('Твоя семья', style: Theme.of(context).textTheme.headlineMedium),
+                Icon(
+                  Icons.groups_outlined,
+                  size: 17,
+                  color: theme.textTheme.bodySmall?.color,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Семья',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: theme.textTheme.bodySmall?.color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const Spacer(),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.person_add_alt, size: 18),
+                TextButton.icon(
+                  icon: const Icon(Icons.person_add_alt, size: 17),
                   label: const Text('Пригласить'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.gold,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   onPressed: () => showDialog(
                     context: context,
                     builder: (_) => const InviteDialog(),
@@ -71,31 +93,44 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
               ],
             ),
           ),
-          SizedBox(
-            height: 92,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              itemCount: members.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
-              itemBuilder: (context, i) => _MemberAvatar(
-                member: members[i],
-                selected: authorFilter == members[i].id,
-                onTap: () {
-                  final notifier = ref.read(familyAuthorFilterProvider.notifier);
-                  notifier.state =
-                      authorFilter == members[i].id ? null : members[i].id;
-                },
+          if (members.isNotEmpty)
+            SizedBox(
+              height: 74,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                itemCount: members.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, i) => _MemberAvatar(
+                  member: members[i],
+                  selected: authorFilter == members[i].id,
+                  onTap: () {
+                    final notifier =
+                        ref.read(familyAuthorFilterProvider.notifier);
+                    notifier.state = authorFilter == members[i].id
+                        ? null
+                        : members[i].id;
+                  },
+                ),
               ),
             ),
-          ),
           if (authorFilter != null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Chip(
-                label: const Text('Фильтр по участнику'),
-                onDeleted: () =>
-                    ref.read(familyAuthorFilterProvider.notifier).state = null,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: TextButton.icon(
+                icon: const Icon(Icons.filter_alt_off, size: 16),
+                label: const Text('Сбросить фильтр'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.gold,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () =>
+                    ref.read(familyAuthorFilterProvider.notifier).state =
+                        null,
               ),
             ),
           const NoteInputBar(forceFamily: true, showFamilyToggle: false),
@@ -130,14 +165,16 @@ class _MemberAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.color;
     return GestureDetector(
       onTap: onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Без тени: только тонкое золотое кольцо выбора — легче визуально.
           Container(
-            width: 46,
-            height: 46,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: member.isMe ? AppColors.gold : theme.cardTheme.color,
@@ -145,29 +182,29 @@ class _MemberAvatar extends StatelessWidget {
                 color: selected ? AppColors.gold : Colors.transparent,
                 width: 2,
               ),
-              boxShadow: const [
-                BoxShadow(color: AppColors.shadow, blurRadius: 6, offset: Offset(0, 2)),
-              ],
             ),
             alignment: Alignment.center,
             child: Text(
               member.initial,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontSize: 16,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontSize: 14,
                 color: member.isMe ? Colors.white : AppColors.gold,
               ),
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
           SizedBox(
-            width: 56,
+            width: 52,
             child: Text(
               member.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(height: 1.2),
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 11,
+                height: 1.2,
+                color: muted,
+              ),
             ),
           ),
         ],

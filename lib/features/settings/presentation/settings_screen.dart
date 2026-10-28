@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/services/notification_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../models/app_settings.dart';
 import 'paywall_screen.dart';
@@ -88,6 +89,17 @@ class SettingsScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.notification_important_outlined,
+                      color: AppColors.gold),
+                  title: const Text('Проверить уведомление'),
+                  subtitle: const Text(
+                    'Тест через 10 секунд и статус разрешений',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _runNotificationTest(context, ref),
+                ),
               ],
             ),
           ),
@@ -174,6 +186,62 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _runNotificationTest(
+      BuildContext context, WidgetRef ref) async {
+    final service = ref.read(notificationServiceProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    if (service is NoopNotificationService) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('На этой платформе локальные уведомления недоступны'),
+        ),
+      );
+      return;
+    }
+
+    final diag = await service.diagnose();
+    await service.scheduleTest();
+
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Тест запланирован'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _DiagRow(
+              ok: diag.notificationsAllowed,
+              text: 'Разрешение на уведомления',
+            ),
+            _DiagRow(
+              ok: diag.exactAlarmsAllowed,
+              text: 'Точные будильники',
+            ),
+            _DiagRow(
+              ok: diag.pendingCount > 0,
+              text: 'Уведомлений в очереди: ${diag.pendingCount}',
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Тестовое уведомление придёт через 10 секунд. '
+              'Если не пришло — проверьте автозапуск, фоновую работу '
+              'без ограничений по батарее и замок приложения в недавних.',
+              style: TextStyle(fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Понятно'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _editProfile(BuildContext context, WidgetRef ref) async {
     final settings = ref.read(settingsProvider).valueOrNull ?? const AppSettings();
     final nameController = TextEditingController(text: settings.profileName);
@@ -240,6 +308,31 @@ class SettingsScreen extends ConsumerWidget {
   void _comingSoon(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Документы будут опубликованы к релизу')),
+    );
+  }
+}
+
+class _DiagRow extends StatelessWidget {
+  final bool ok;
+  final String text;
+
+  const _DiagRow({required this.ok, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            ok ? Icons.check_circle : Icons.cancel,
+            size: 18,
+            color: ok ? AppColors.success : AppColors.danger,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+        ],
+      ),
     );
   }
 }

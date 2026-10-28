@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -9,6 +10,8 @@ import '../core/services/notification_service.dart';
 import '../core/services/ocr_service.dart';
 import '../core/services/sync_service.dart';
 import '../core/services/voice_input_service.dart';
+import '../core/services/voice_model_service.dart';
+import '../core/services/vosk_voice_service.dart';
 import '../features/ai/ai_connection_service.dart';
 import '../features/ai/ai_reminder_parser.dart';
 import '../features/ai/llm/ai_client_factory.dart';
@@ -39,9 +42,22 @@ final syncServiceProvider = Provider<SyncService>(
   (ref) => LocalSyncService(),
 );
 
-final voiceInputServiceProvider = Provider<VoiceInputService>(
-  (ref) => SpeechToTextVoiceService(),
+/// Состояние и загрузка офлайн-модели распознавания речи.
+final voiceModelServiceProvider =
+    StateNotifierProvider<VoiceModelService, VoiceModelState>(
+  (ref) => VoiceModelService()..checkExisting(),
 );
+
+/// Офлайн Vosk — только на Android; на остальных платформах Noop,
+/// чтобы web-сборка не тянула плагин без нативной реализации.
+final voiceInputServiceProvider = Provider<VoiceInputService>((ref) {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+    return NoopVoiceService();
+  }
+  return VoskVoiceService(
+    ref.watch(voiceModelServiceProvider.notifier),
+  );
+});
 
 final ocrServiceProvider = Provider<OcrService>(
   (ref) => kIsWeb ? NoopOcrService() : MlKitOcrService(),

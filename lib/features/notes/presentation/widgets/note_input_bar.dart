@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../app/providers.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -8,6 +9,7 @@ import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
 import '../../../../core/services/voice_input_service.dart';
+import '../../../../core/services/voice_model_service.dart';
 import '../../../ai/llm/ai_client_factory.dart';
 import '../../../settings/models/app_settings.dart';
 import '../../models/note_attachment.dart';
@@ -47,11 +49,12 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   String? _manualCategoryKey;
   late bool _isFamily = widget.forceFamily;
   bool _listening = false;
-  // Диагностика тихой сессии: было ли хоть одно распознанное слово
-  // и прилетала ли ошибка — чтобы не показывать два снэкбара подряд.
-  bool _voiceGotText = false;
-  bool _voiceErrored = false;
-  bool _voiceManualStop = false;
+  // Движок готовит модель/распознаватель (1–3 сек) — показываем
+  // спиннер вместо иконки, чтобы нажатие не выглядело «мёртвым».
+  bool _voiceBusy = false;
+  // Текст, набранный руками до начала сессии: распознанное подставляется
+  // суффиксом и заменяется целиком (Vosk отдаёт нарастающий partial).
+  String _voiceBase = '';
 
   @override
   void initState() {
@@ -117,79 +120,185 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   }
 
   Future<void> _toggleVoice() async {
-    final voice = ref.read(voiceInputServiceProvider);
     if (_listening) {
-      _voiceManualStop = true;
-      await voice.stopListening();
+      await ref.read(voiceInputServiceProvider).stopListening();
       if (mounted) setState(() => _listening = false);
       return;
     }
-    _voiceManualStop = false;
-    final messenger = ScaffoldMessenger.of(context);
-    final check = await voice.ensureAvailable();
-    if (!check.ok || !mounted) {
-      final message = switch (check.availability) {
-        VoiceAvailability.permissionDenied =>
-          'Нет доступа к микрофону: Настройки телефона → Приложения → '
-              'Smart Notes → Разрешения → Микрофон',
-        VoiceAvailability.noRecognitionService =>
-          'Сервис распознавания речи не найден. Установите приложение '
-              'Google и «Синтезатор речи Google», затем проверьте '
-              'интернет и попробуйте снова',
-        VoiceAvailability.unavailable =>
-          'Голосовой ввод сейчас недоступен'
-              '${check.technicalDetails != null ? ': ${check.technicalDetails}' : ''}',
-        VoiceAvailability.available => '',
-      };
-      messenger.showSnackBar(SnackBar(content: Text(message)));
+
+    final modelState = ref.read(voiceModelServiceProvider);
+    if (!modelState.isReady) {
+      await _showVoiceModelSheet();
       return;
     }
-    _voiceGotText = false;
-    _voiceErrored = false;
-    setState(() => _listening = true);
-    await voice.startListening(
-      onText: (spoken) {
-        _voiceGotText = true;
-        final base = _controller.text.isEmpty ? '' : '${_controller.text} ';
-        _controller.text = '$base$spoken';
-      },
-      onStatus: (active) {
-        if (!mounted) return;
-        setState(() => _listening = active);
-        // Сессия закрылась движком, но ни слова не пришло и ошибки нет —
-        // раньше это выглядело как «микрофон горит и молчит».
-        if (!active &&
-            !_voiceGotText &&
-            !_voiceErrored &&
-            !_voiceManualStop) {
-          messenger.showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Речь не распознана. Проверьте: есть ли интернет '
-                '(языковая модель докачивается), выбран ли Google в '
-                'Настройки → Система → Язык и ввод → голосовой ввод, '
-                'и говорите ли вы после нажатия микрофона.',
+    await _startVoiceSession();
+  }
+
+  /// Одноразовая загрузка офлайн-модели: BottomSheet с объяснением,
+  /// живым прогрессом в МБ и повтором при ошибке.
+  Future<void> _showVoiceModelSheet() async {
+    final modelService = ref.read(voiceModelServiceProvider.notifier);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return Consumer(
+          builder: (context, ref, _) {
+            // Модель готова — закрываем шит, сессия стартует ниже.
+            ref.listen<VoiceModelState>(voiceModelServiceProvider,
+                (prev, next) {
+              if (next.phase == VoiceModelPhase.ready &&
+                  Navigator.of(sheetContext).canPop()) {
+                Navigator.of(sheetContext).pop();
+              }
+            });
+            final state = ref.watch(voiceModelServiceProvider);
+            final downloading =
+                state.phase == VoiceModelPhase.downloading ||
+                    state.phase == VoiceModelPhase.extracting;
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.mic_none, color: AppColors.gold),
+                        const SizedBox(width: 10),
+                        Text('Голосовой ввод',
+                            style: Theme.of(context).textTheme.titleMedium),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Нужно один раз скачать офлайн-модель русской речи '
+                      'около 45 МБ. После этого диктовка работает без '
+                      'интернета и без Google-сервисов.',
+                    ),
+                    const SizedBox(height: 16),
+                    if (state.phase == VoiceModelPhase.error) ...[
+                      Text(
+                        'Не удалось скачать: ${state.error ?? 'ошибка сети'}. '
+                        'Проверьте интернет и попробуйте снова.',
+                        style: const TextStyle(color: AppColors.danger),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (downloading) ...[
+                      LinearProgressIndicator(
+                        value: state.phase == VoiceModelPhase.extracting
+                            ? null
+                            : (state.progress > 0 ? state.progress : null),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        state.phase == VoiceModelPhase.extracting
+                            ? 'Распаковка модели…'
+                            : 'Скачивание: ${_mb(state.receivedBytes)}'
+                                '${state.totalBytes > 0 ? ' из ${_mb(state.totalBytes)}' : ''}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        icon: Icon(state.phase == VoiceModelPhase.error
+                            ? Icons.refresh
+                            : Icons.download_rounded),
+                        label: Text(downloading
+                            ? 'Идёт загрузка…'
+                            : state.phase == VoiceModelPhase.error
+                                ? 'Повторить'
+                                : 'Скачать модель'),
+                        onPressed: downloading
+                            ? null
+                            : () => modelService.download(),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              duration: Duration(seconds: 4),
-            ),
-          );
-        }
-      },
-      onError: (message) {
-        if (!mounted) return;
-        _voiceErrored = true;
-        setState(() => _listening = false);
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Не удалось распознать речь: $message. '
-              'Проверьте интернет и сервис речи в настройках системы.',
-            ),
-          ),
+            );
+          },
         );
       },
     );
+
+    // Модель докачалась, пока шит был открыт, — сразу стартуем сессию.
+    if (mounted && ref.read(voiceModelServiceProvider).isReady) {
+      await _startVoiceSession();
+    }
   }
+
+  Future<void> _startVoiceSession() async {
+    final voice = ref.read(voiceInputServiceProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    final check = await voice.ensureAvailable();
+    if (!check.ok || !mounted) {
+      if (check.availability == VoiceAvailability.permissionDenied) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Нет доступа к микрофону — включите его в настройках '
+              'приложения, чтобы диктовать заметки.',
+            ),
+            action: SnackBarAction(
+              label: 'Настройки',
+              onPressed: openAppSettings,
+            ),
+          ),
+        );
+      } else {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Голосовой ввод недоступен'
+              '${check.technicalDetails != null ? ': ${check.technicalDetails}' : ''}',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    _voiceBase = _controller.text.trim();
+    setState(() {
+      _voiceBusy = true;
+      _listening = true;
+    });
+    await voice.startListening(
+      onText: (spoken) {
+        final prefix = _voiceBase.isEmpty ? '' : '$_voiceBase ';
+        _controller.text = '$prefix$spoken';
+        _controller.selection =
+            TextSelection.collapsed(offset: _controller.text.length);
+      },
+      onStatus: (active) {
+        if (!mounted) return;
+        setState(() {
+          _voiceBusy = false;
+          _listening = active;
+        });
+      },
+      onError: (message) {
+        if (!mounted) return;
+        setState(() {
+          _voiceBusy = false;
+          _listening = false;
+        });
+        messenger.showSnackBar(
+          SnackBar(content: Text('Ошибка распознавания: $message')),
+        );
+      },
+    );
+    if (mounted) setState(() => _voiceBusy = false);
+  }
+
+  static String _mb(int bytes) =>
+      '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ';
 
   Future<void> _pickManualReminder() async {
     final date = await showDatePicker(
@@ -474,11 +583,18 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       constraints: const BoxConstraints(
                           minWidth: 40, minHeight: 40),
                       padding: const EdgeInsets.all(6),
-                      icon: Icon(
-                        _listening ? Icons.mic : Icons.mic_none,
-                        color: _listening ? AppColors.danger : null,
-                      ),
-                      onPressed: _toggleVoice,
+                      icon: _voiceBusy
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              _listening ? Icons.mic : Icons.mic_none,
+                              color: _listening ? AppColors.danger : null,
+                            ),
+                      onPressed:
+                          _voiceBusy ? null : _toggleVoice,
                     ),
                     IconButton(
                       tooltip: 'Прикрепить файл',
