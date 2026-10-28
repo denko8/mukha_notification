@@ -8,6 +8,7 @@ import '../core/services/deep_link_service.dart';
 import '../core/services/json_store.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/ocr_service.dart';
+import '../core/services/share_service.dart';
 import '../core/services/sync_service.dart';
 import '../core/services/voice_input_service.dart';
 import '../core/services/voice_model_service.dart';
@@ -41,6 +42,8 @@ final notificationServiceProvider = Provider<NotificationService>(
 final syncServiceProvider = Provider<SyncService>(
   (ref) => LocalSyncService(),
 );
+
+final shareServiceProvider = Provider<ShareService>((ref) => ShareService());
 
 /// Состояние и загрузка офлайн-модели распознавания речи.
 final voiceModelServiceProvider =

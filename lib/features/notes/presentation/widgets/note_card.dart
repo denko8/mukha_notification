@@ -85,6 +85,19 @@ class NoteCard extends ConsumerWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    // Шеринг в один тап, не открывая заметку: системный
+                    // лист с Telegram / MAX / VK / WhatsApp и т.д.
+                    IconButton(
+                      tooltip: 'Поделиться',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      padding: const EdgeInsets.all(4),
+                      iconSize: 19,
+                      icon: const Icon(Icons.ios_share),
+                      color: AppColors.gold,
+                      onPressed: () =>
+                          ref.read(shareServiceProvider).shareNote(note),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),

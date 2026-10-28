@@ -6,7 +6,6 @@ import 'package:open_filex/open_filex.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/services/calendar_service.dart';
@@ -169,13 +168,10 @@ class NoteDetailScreen extends ConsumerWidget {
                 case 'delete':
                   await _confirmDelete(context, ref, note);
                 case 'share':
-                  // Шеринг открывает системный лист — оттуда можно выбрать
-                  // Telegram, WhatsApp, SMS и другие приложения.
-                  await Share.share(
-                    note.reminderAt != null
-                        ? '${note.text}\nНапоминание: ${DateFormatter.full(note.reminderAt!)}'
-                        : note.text,
-                  );
+                  // Системный лист: Telegram, MAX, VK, WhatsApp, SMS, почта.
+                  await ref
+                      .read(shareServiceProvider)
+                      .shareNote(note);
                 case 'pdf':
                   await _exportPdf(ref, note);
               }
