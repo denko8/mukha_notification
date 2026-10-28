@@ -28,28 +28,7 @@ class _MainScaffoldState extends State<MainScaffold> {
     return Scaffold(
       body: Column(
         children: [
-          if (kIsWeb)
-            Material(
-              color: AppColors.goldSoft,
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.info_outline, size: 14, color: AppColors.gold),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        'Web-превью: данные хранятся в памяти вкладки и сбросятся '
-                        'после перезагрузки. Полная версия — Android/iOS.',
-                        style: TextStyle(fontSize: 11, color: AppColors.gold),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          if (kIsWeb) const _WebPreviewBanner(),
           Expanded(child: IndexedStack(index: _index, children: _screens)),
         ],
       ),
@@ -73,6 +52,36 @@ class _MainScaffoldState extends State<MainScaffold> {
             label: 'Settings',
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Золотистый баннер web-превью: данные живут только в памяти вкладки.
+class _WebPreviewBanner extends StatelessWidget {
+  const _WebPreviewBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Material(
+      color: AppColors.goldSoft,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.info_outline, size: 14, color: AppColors.gold),
+            SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                'Web-превью: данные хранятся в памяти вкладки и сбросятся '
+                'после перезагрузки. Полная версия — Android/iOS.',
+                style: TextStyle(fontSize: 11, color: AppColors.gold),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
