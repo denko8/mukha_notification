@@ -8,7 +8,7 @@ import '../models/app_settings.dart';
 class SettingsNotifier extends AsyncNotifier<AppSettings> {
   static const _fileName = 'settings.json';
 
-  JsonStore get _store => ref.read(jsonStoreProvider);
+  JsonStoreBase get _store => ref.read(jsonStoreProvider);
 
   @override
   Future<AppSettings> build() async {

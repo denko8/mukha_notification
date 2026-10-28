@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
@@ -25,7 +26,33 @@ class _MainScaffoldState extends State<MainScaffold> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(index: _index, children: _screens),
+      body: Column(
+        children: [
+          if (kIsWeb)
+            Material(
+              color: AppColors.goldSoft,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: AppColors.gold),
+                    SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Web-превью: данные хранятся в памяти вкладки и сбросятся '
+                        'после перезагрузки. Полная версия — Android/iOS.',
+                        style: TextStyle(fontSize: 11, color: AppColors.gold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(child: IndexedStack(index: _index, children: _screens)),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),

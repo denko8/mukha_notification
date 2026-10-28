@@ -8,7 +8,7 @@ import '../models/family_member.dart';
 /// коду имитируется на устройстве, чтобы весь флоу можно было протестировать
 /// без бэкенда.
 class FamilyRepository {
-  final JsonStore store;
+  final JsonStoreBase store;
   static const _membersFile = 'family_members.json';
   static const _invitesFile = 'family_invites.json';
   static const _inviteBase = 'https://smartnotes.app/invite/';

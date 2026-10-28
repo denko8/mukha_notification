@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -14,13 +15,20 @@ Future<void> main() async {
   // Русские форматы дат (intl).
   await initializeDateFormatting('ru');
 
-  // Локальное хранилище в каталоге документов приложения.
-  final docsDir = await getApplicationDocumentsDirectory();
-  final store = JsonStore(docsDir);
-
-  // Локальные напоминания.
-  final notifications = LocalNotificationService();
-  await notifications.init();
+  // На web нет ни файловой системы (path_provider), ни локальных
+  // уведомлений — используем in-memory хранилище и no-op сервис.
+  // Боевой таргет — Android/iOS с персистентным JSON-хранилищем.
+  final JsonStoreBase store;
+  final NotificationService notifications;
+  if (kIsWeb) {
+    store = InMemoryJsonStore();
+    notifications = NoopNotificationService();
+  } else {
+    final docsDir = await getApplicationDocumentsDirectory();
+    store = JsonStore(docsDir);
+    notifications = LocalNotificationService();
+    await notifications.init();
+  }
 
   final container = ProviderContainer(
     overrides: [

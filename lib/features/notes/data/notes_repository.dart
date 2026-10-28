@@ -10,7 +10,7 @@ import '../models/note_attachment.dart';
 /// которые облачный SyncService отправит на сервер (сейчас или потом —
 /// при появлении сети, раздел 2.2 ТЗ).
 class NotesRepository {
-  final JsonStore store;
+  final JsonStoreBase store;
   final NotificationService notifications;
   static const _fileName = 'notes.json';
 

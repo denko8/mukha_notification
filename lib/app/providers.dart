@@ -15,7 +15,7 @@ import '../features/settings/state/settings_notifier.dart';
 /// Инфраструктурные провайдеры.
 /// [jsonStoreProvider] и [notificationServiceProvider] переопределяются
 /// в main() (боевой запуск) и в тестах (временный каталог / заглушка).
-final jsonStoreProvider = Provider<JsonStore>(
+final jsonStoreProvider = Provider<JsonStoreBase>(
   (ref) => throw UnimplementedError('JsonStore must be overridden in main()'),
 );
 
