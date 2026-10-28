@@ -71,19 +71,51 @@
 (в debug-режиме добавляется автоматически, для release нужен явно);
 `RECEIVE_BOOT_COMPLETED` — восстановление напоминаний после перезагрузки.
 
-### 3.2. Core library desugaring (обязательно для flutter_local_notifications 17)
+### 3.2. Core library desugaring + единый JVM target (обязательно)
 
-Файл `android/app/build.gradle` (Groovy, Flutter 3.27). В блок `android { }`:
+Нужно для `flutter_local_notifications` 17 (использует `java.time`).
+AGP 8+ по умолчанию компилирует Java в 11, поэтому и Java, и Kotlin
+выравниваем на **11** — иначе Gradle 9 падает с
+`Inconsistent JVM Target Compatibility` (в т.ч. внутри плагинов вроде
+`flutter_timezone`).
+
+#### Kotlin DSL (`android/app/build.gradle.kts`) — актуальный шаблон
+
+```kotlin
+android {
+    // ...существующие namespace/applicationId/minSdk...
+
+    compileOptions {
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+        }
+    }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+```
+
+Важно: старый блок `kotlinOptions { jvmTarget = "1.8" }` НЕ применять —
+Kotlin 2.x считает его обособленным и конфликтует с Java 11.
+
+#### Groovy (`android/app/build.gradle`), если шаблон старый
 
 ```gradle
 android {
     compileOptions {
         coreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '11'
     }
 }
 
@@ -92,23 +124,55 @@ dependencies {
 }
 ```
 
-Если сгенерировался Kotlin DSL (`build.gradle.kts`), синтаксис такой:
+### 3.3. Выравнивание JVM target во ВСЕХ модулях (если ошибка в плагине)
+
+Ошибка вида
+`compileDebugJavaWithJavac (11) ... compileDebugKotlin (1.8)` в модуле
+`:flutter_timezone` (или другом плагине) означает: свой `build.gradle`
+плагина зашит под 1.8, а Java вокруг уже 11. Принудительно выравниваем
+все подпроекты. Файл `android/build.gradle.kts` (корневой), добавить
+в конец файла:
 
 ```kotlin
-android {
-    compileOptions {
-        isCoreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-    kotlinOptions {
-        jvmTarget = "1.8"
+subprojects {
+    afterEvaluate {
+        // Java-цели всех Android-модулей -> 11
+        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_11
+                targetCompatibility = JavaVersion.VERSION_11
+            }
+        }
+        // Kotlin-цели всех модулей -> 11
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java)
+            .configureEach {
+                compilerOptions {
+                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+                }
+            }
     }
 }
+```
 
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+Groovy-вариант (корневой `android/build.gradle`):
+
+```gradle
+subprojects {
+    afterEvaluate {
+        if (project.hasProperty('android')) {
+            project.android.compileOptions {
+                sourceCompatibility JavaVersion.VERSION_11
+                targetCompatibility JavaVersion.VERSION_11
+            }
+        }
+        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions {
+                jvmTarget = '11'
+            }
+        }
+    }
 }
+```
 ```
 
 `minSdk` по умолчанию (21) всем плагинам проекта достаточен; если какой-то
@@ -202,3 +266,31 @@ NDK r28b. В РФ автодокачка с Google-серверов часто �
   JDK, на сборку не влияют.
 - `sdkmanager is deprecated. Android CLI will be used` — информационное
   сообщение Google, действий не требует.
+- `source value 8 is obsolete` / `target value 8 is obsolete` — это
+  последствия jvmTarget 1.8; после перехода на 11 (раздел 3.2/3.3)
+  предупреждения исчезают.
+
+## 7. Ошибка «Inconsistent JVM Target Compatibility»
+
+```text
+Execution failed for task ':flutter_timezone:compileDebugKotlin'.
+Inconsistent JVM-target compatibility detected for tasks
+'compileDebugJavaWithJavac' (11) and 'compileDebugKotlin' (1.8).
+```
+
+Причина: AGP 8+ компилирует Java по умолчанию в 11, а старые плагины
+(`flutter_timezone`, часть ML Kit/речевых) внутри своих модулей задают
+Kotlin 1.8 — новый Gradle 9 считает такое рассогласование фатальным.
+
+Лечение:
+
+1. В `android/app/build.gradle.kts` привести обе цели к 11 и включить
+   desugaring — см. раздел 3.2.
+2. В корневой `android/build.gradle.kts` добавить блок `subprojects`
+   выравнивания для всех плагинов — см. раздел 3.3.
+3. Собрать заново:
+
+   ```powershell
+   flutter clean
+   flutter run
+   ```
