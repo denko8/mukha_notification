@@ -302,29 +302,113 @@ zip, ~90 МБ после распаковки) скачивается один �
 упакована, поэтому установочный файл остаётся лёгким. После загрузки
 диктовка работает без интернета.
 
-### 10.1. Gradle: Maven-репозиторий alphacephei (обязательно)
+### 10.1. Gradle: репозитории alphacephei и движка Flutter (обязательно)
 
-Нативный движок Vosk (`com.alphacephei:vosk-android`) и JNA лежат в
-Maven-репозитории `https://alphacephei.com/maven/`. В современных
-проектах репозитории задаются в `android/settings.gradle.kts` через
-`dependencyResolutionManagement`; если оставить режим
-`FAIL_ON_PROJECT_REPOS`, собственный репозиторий плагина вызовет ошибку
-сборки. Добавьте репозиторий явно:
+Нужны два нестандартных Maven-репозитория:
+
+1. `https://alphacephei.com/maven/` — нативный движок Vosk
+   (`com.alphacephei:vosk-android`) и JNA;
+2. репозиторий движка Flutter — оттуда берутся `io.flutter:flutter_embedding_*`
+   и `io.flutter:arm64_v8a_*`. По умолчанию это
+   `https://storage.googleapis.com/download.flutter.io`, а при заданной
+   переменной `FLUTTER_STORAGE_BASE_URL` (зеркало, в т.ч. китайское) —
+   `$FLUTTER_STORAGE_BASE_URL/download.flutter.io`.
+
+Тонкость: Flutter Gradle-плагин регистрирует репозиторий движка
+**проектным** (`rootProject.allprojects { repositories { ... } }`).
+Режим `PREFER_SETTINGS` проектные репозитории игнорирует — поэтому
+движковый репозиторий надо явно продублировать на уровне settings,
+иначе сборка падает (см. 10.1.2). Готовый блок для
+`android/settings.gradle.kts`:
 
 ```kotlin
 dependencyResolutionManagement {
+    // PREFER_SETTINGS, а не FAIL_ON_PROJECT_REPOS: vosk_flutter в своём
+    // build.gradle объявляет проектный allprojects-репозиторий, который
+    // при FAIL-режиме роняет сборку.
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
+
+        // Локальный кэш движка Flutter — первый по списку: точная ревизия
+        // движка уже скачана, резолв без сети и не зависит от блокировок.
+        val localProps = java.util.Properties().apply {
+            val f = file("local.properties")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+        val flutterSdk = localProps.getProperty("flutter.sdk")
+            ?: System.getenv("FLUTTER_ROOT")
+        if (flutterSdk != null) {
+            val engineMaven =
+                file("$flutterSdk/bin/cache/artifacts/engine/android")
+            if (engineMaven.exists()) {
+                maven { url = uri(engineMaven) }
+            }
+        }
+
+        // Удалённый репозиторий движка (fallback), с учётом зеркала.
+        val storageBase = System.getenv("FLUTTER_STORAGE_BASE_URL")
+            ?: "https://storage.googleapis.com"
+        maven { url = uri("$storageBase/download.flutter.io") }
+
+        // Нативный Vosk и JNA.
         maven { url = uri("https://alphacephei.com/maven/") }
     }
 }
 ```
 
-Если проект использует Groovy (`settings.gradle`) — аналогичный блок
-`repositories { maven { url 'https://alphacephei.com/maven/' } }`.
+Groovy-вариант (`android/settings.gradle`):
+
+```groovy
+def localProps = new Properties()
+def lpFile = new File(settingsDir, 'local.properties')
+if (lpFile.exists()) lpFile.withReader('UTF-8') { localProps.load(it) }
+def flutterSdk = localProps.getProperty('flutter.sdk') ?: System.getenv('FLUTTER_ROOT')
+def storageBase = System.getenv('FLUTTER_STORAGE_BASE_URL') ?: 'https://storage.googleapis.com'
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        if (flutterSdk != null) {
+            def engineMaven = new File(flutterSdk, 'bin/cache/artifacts/engine/android')
+            if (engineMaven.exists()) {
+                maven { url engineMaven }
+            }
+        }
+        maven { url "$storageBase/download.flutter.io" }
+        maven { url 'https://alphacephei.com/maven/' }
+    }
+}
+```
+
 После правки — `flutter clean && flutter run`.
+
+#### 10.1.2. Ошибка «Could not find io.flutter:flutter_embedding_debug…»
+
+Симптом:
+
+```
+Execution failed for task ':app:mergeDebugAssets'.
+> Could not find io.flutter:flutter_embedding_debug:1.0.0-<хэш>.
+  Searched in: dl.google.com, repo.maven.apache.org, alphacephei.com
+```
+
+В списке локаций нет репозитория движка Flutter — значит settings
+собраны в режиме `PREFER_SETTINGS`, но `download.flutter.io` (и/или
+локальный кэш SDK) в `repositories` не добавлены, а проектный
+репозиторий Flutter-плагина проигнорирован. Лечение — блок из 10.1
+целиком (локальный кэш + `download.flutter.io`). Проверить, не задано
+ли зеркало:
+
+```powershell
+echo $env:FLUTTER_STORAGE_BASE_URL
+```
+
+Если переменная указывает на зеркало — блок 10.1 сам подставит её в
+URL, дополнительных действий не нужно.
 
 ### 10.1.1. Ошибка «Namespace not specified» у vosk_flutter (AGP 8+)
 
