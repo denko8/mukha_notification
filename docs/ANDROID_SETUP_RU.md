@@ -71,11 +71,15 @@
 
 ### 3.2. Модуль :app — desugaring и JVM target 17
 
-Файл `android/app/build.gradle.kts`, внутри блока `android { }`:
+Файл `android/app/build.gradle.kts`, внутри блока `android { }`.
+Заодно явно фиксируем `compileSdk = 36`: свежие плагины
+(`flutter_plugin_android_lifecycle` внутри `file_picker` и др.) требуют
+API 36, а шаблонная переменная `flutter.compileSdkVersion` отстаёт.
 
 ```kotlin
 android {
     // ...существующие namespace/applicationId/minSdk не трогаем...
+    compileSdk = 36
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -113,6 +117,9 @@ subprojects {
         val androidExt =
             extensions.findByName("android") as? com.android.build.gradle.BaseExtension
         if (androidExt != null) {
+            // compileSdk 36 для всех плагинов: AAR-метаданные свежих
+            // зависимостей требуют API 36 (file_picker и его цепочка).
+            androidExt.compileSdkVersion(36)
             androidExt.compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17
                 targetCompatibility = JavaVersion.VERSION_17
@@ -135,6 +142,7 @@ subprojects {
     afterEvaluate {
         def androidExt = extensions.findByName('android')
         if (androidExt != null) {
+            androidExt.compileSdkVersion(36)
             androidExt.compileOptions {
                 sourceCompatibility JavaVersion.VERSION_17
                 targetCompatibility JavaVersion.VERSION_17
@@ -148,6 +156,11 @@ subprojects {
     }
 }
 ```
+
+Платформа `android-36` скачается автоматически при первой сборке
+(лицензии уже приняты через `flutter doctor --android-licenses`); при
+обрыве сети — установить вручную в **Settings → Android SDK → SDK
+Platforms → Android 16 (API 36)**.
 
 Почему цель именно 17 для всех: `audioplayers_android` зашит под Java 17
 (понизить нельзя), а `flutter_timezone`, `share_plus` и остальные
@@ -253,3 +266,30 @@ Show Package Details → NDK (Side by side) → 28.2.13676358** (возможн�
 Правки Gradle и манифеста локальные, `git status` их не показывает.
 Все рабочие сниппеты лежат в этом документе, поэтому после повторной
 генерации платформенной папки они применяются заново за пару минут.
+
+## 9. Ошибка AAR metadata «requires ... compile against version 36 or later»
+
+```text
+Execution failed for task ':file_picker:checkDebugAarMetadata'.
+Dependency ':flutter_plugin_android_lifecycle' requires libraries and
+applications that depend on it to compile against version 36 or later.
+:file_picker is currently compiled against android-34.
+```
+
+Причина: свежие версии плагинов в своих AAR-метаданных требуют
+`compileSdk 36`, а модули плагинов по умолчанию собираются против 34
+(`flutter.compileSdkVersion` шаблона отстаёт). `targetSdk` и `minSdk`
+при этом менять не нужно — речь только об уровне API, против которого
+идёт компиляция.
+
+Лечение в два шага:
+
+1. В `android/app/build.gradle.kts` заменить
+   `compileSdk = flutter.compileSdkVersion` на `compileSdk = 36`
+   (раздел 3.2).
+2. В корневом `android/build.gradle.kts` в том же `afterEvaluate`-блоке
+   добавить `androidExt.compileSdkVersion(36)` — это поднимает
+   `compileSdk` и всем модулям плагинов, включая `:file_picker`
+   (раздел 3.3).
+
+Платформа Android API 36 доустановится автоматически при сборке.
