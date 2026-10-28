@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
@@ -49,10 +50,13 @@ class LocalNotificationService implements NotificationService {
     );
 
     // Android 13+: запрос разрешения на уведомления.
-    await _plugin
+    final androidPlugin = _plugin
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.requestNotificationsPermission();
+    // Android 12+: право на точные будильники. На части прошивок
+    // (vivo/OPPO/Xiaomi) выдаётся через системный экран настроек.
+    await androidPlugin?.requestExactAlarmsPermission();
     _ready = true;
   }
 
@@ -67,27 +71,47 @@ class LocalNotificationService implements NotificationService {
     // Напоминание на прошедшее время не планируем.
     if (!when.isAfter(DateTime.now())) return;
 
-    const details = NotificationDetails(
+    final details = NotificationDetails(
       android: AndroidNotificationDetails(
         'smart_notes_reminders',
         'Напоминания',
         channelDescription: 'Напоминания о заметках Smart Notes',
         importance: Importance.high,
         priority: Priority.high,
+        category: AndroidNotificationCategory.reminder,
+        visibility: NotificationVisibility.public,
       ),
-      iOS: DarwinNotificationDetails(),
+      iOS: const DarwinNotificationDetails(),
     );
+    final tzWhen = tz.TZDateTime.from(when, tz.local);
 
-    await _plugin.zonedSchedule(
-      id,
-      title,
-      body,
-      tz.TZDateTime.from(when, tz.local),
-      details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-    );
+    // Сначала пробуем точный будильник; если прошивка не дала право
+    // (SecurityException/PlatformException на части китайских ROM),
+    // откатываемся на неточное планирование — уведомление всё равно
+    // доставляется, лишь с возможной задержкой в пределах окна Doze.
+    try {
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        tzWhen,
+        details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } on PlatformException {
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        tzWhen,
+        details,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    }
   }
 
   @override

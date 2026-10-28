@@ -60,7 +60,7 @@ class _TodayHeaderState extends ConsumerState<TodayHeader> {
         curve: Curves.easeInOut,
         height: _expanded ? screenHeight * 0.46 : screenHeight * 0.15,
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: theme.cardTheme.color,
           borderRadius: BorderRadius.circular(AppColors.radiusCard),

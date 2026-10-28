@@ -72,10 +72,10 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
             ),
           ),
           SizedBox(
-            height: 84,
+            height: 92,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               itemCount: members.length,
               separatorBuilder: (_, __) => const SizedBox(width: 12),
               itemBuilder: (context, i) => _MemberAvatar(
@@ -133,10 +133,11 @@ class _MemberAvatar extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: member.isMe ? AppColors.gold : theme.cardTheme.color,
@@ -152,6 +153,7 @@ class _MemberAvatar extends StatelessWidget {
             child: Text(
               member.initial,
               style: theme.textTheme.titleLarge?.copyWith(
+                fontSize: 16,
                 color: member.isMe ? Colors.white : AppColors.gold,
               ),
             ),
@@ -164,7 +166,8 @@ class _MemberAvatar extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(height: 1.2),
             ),
           ),
         ],

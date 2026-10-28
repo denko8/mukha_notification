@@ -62,7 +62,7 @@ class AppTheme {
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: textColor,
-          fontSize: 24,
+          fontSize: 21,
           fontWeight: FontWeight.bold,
           fontFamily: fontFamily,
         ),
@@ -81,12 +81,12 @@ class AppTheme {
           backgroundColor: scheme.primary,
           foregroundColor: scheme.onPrimary,
           elevation: 1,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppColors.radiusButton),
           ),
           textStyle: const TextStyle(
-            fontSize: 16,
+            fontSize: 15,
             fontWeight: FontWeight.w600,
             fontFamily: fontFamily,
           ),
@@ -99,7 +99,7 @@ class AppTheme {
         filled: true,
         fillColor: scheme.surface,
         contentPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppColors.radiusCard),
           borderSide: BorderSide.none,
@@ -112,7 +112,7 @@ class AppTheme {
           borderRadius: BorderRadius.circular(AppColors.radiusCard),
           borderSide: const BorderSide(color: AppColors.gold, width: 1.5),
         ),
-        hintStyle: TextStyle(color: secondaryText, fontSize: 16),
+        hintStyle: TextStyle(color: secondaryText, fontSize: 15),
       ),
       dividerTheme: DividerThemeData(
         color: secondaryText.withValues(alpha: 0.15),
@@ -139,10 +139,10 @@ class AppTheme {
       ),
       textTheme: TextTheme(
         headlineMedium: TextStyle(
-            fontSize: 24, fontWeight: FontWeight.bold, color: textColor),
+            fontSize: 22, fontWeight: FontWeight.bold, color: textColor),
         titleLarge: TextStyle(
-            fontSize: 18, fontWeight: FontWeight.w500, color: textColor),
-        bodyLarge: TextStyle(fontSize: 16, color: textColor),
+            fontSize: 17, fontWeight: FontWeight.w500, color: textColor),
+        bodyLarge: TextStyle(fontSize: 15, color: textColor),
         bodyMedium: TextStyle(fontSize: 14, color: textColor),
         bodySmall: TextStyle(fontSize: 12, color: secondaryText),
       ),

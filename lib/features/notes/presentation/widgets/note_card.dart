@@ -55,7 +55,7 @@ class NoteCard extends ConsumerWidget {
           borderRadius: BorderRadius.circular(AppColors.radiusCard),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
