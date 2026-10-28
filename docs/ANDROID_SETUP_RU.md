@@ -147,3 +147,58 @@ dependencies {
   flutter analyze
   flutter test
   ```
+
+## 6. Ошибка «sdkmanager did not install NDK 28.2.13676358»
+
+Свежий шаблон Flutter прописывает в `android/app/build.gradle.kts`
+строку `ndkVersion = flutter.ndkVersion`, и Gradle пытается сам скачать
+NDK r28b. В РФ автодокачка с Google-серверов часто обрывается, тогда
+сборка падает на конфигурации проекта. Два пути решения.
+
+### Путь А — установить NDK через Android Studio (надёжнее)
+
+1. **File → Settings → Languages & Frameworks → Android SDK**.
+2. Вкладка **SDK Tools**, включить галочку **Show Package Details**
+   внизу окна.
+3. В дереве раскрыть **NDK (Side by side)** → отметить версию
+   **28.2.13676358** (заодно можно отметить последнюю CMake).
+4. **Apply → OK**, дождаться загрузки, затем:
+
+   ```powershell
+   flutter clean
+   flutter run
+   ```
+
+Если загрузка в Studio тоже обрывается — включить VPN/прокси на время
+установки либо повторить позднее: это разовая операция, дальше NDK
+живёт локально в `%LOCALAPPDATA%\Android\sdk\ndk\`.
+
+### Путь Б — убрать требование NDK (быстрый, нашему проекту он не нужен)
+
+Ни один плагин Smart Notes не содержит собственного C/C++-кода
+(`speech_to_text`, ML Kit, уведомления и остальные поставляются
+готовыми AAR), поэтому NDK для сборки не требуется.
+
+1. Открыть `android/app/build.gradle.kts`, внутри блока `android { }`
+   удалить строку:
+
+   ```kotlin
+   ndkVersion = flutter.ndkVersion
+   ```
+
+2. Если рядом есть ссылка на NDK в `android/build.gradle.kts` — её не
+   трогать, там только версии плагинов.
+3. Перезапустить сборку:
+
+   ```powershell
+   flutter clean
+   flutter run
+   ```
+
+### Про безобидные предупреждения в логе
+
+- `A restricted method in java.lang.System has been called` /
+  `--enable-native-access=ALL-UNNAMED` — предупреждения Gradle 9 на новых
+  JDK, на сборку не влияют.
+- `sdkmanager is deprecated. Android CLI will be used` — информационное
+  сообщение Google, действий не требует.
