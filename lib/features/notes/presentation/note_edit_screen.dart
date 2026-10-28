@@ -57,7 +57,7 @@ class _NoteEditScreenState extends ConsumerState<NoteEditScreen> {
               await ref.read(notesNotifierProvider.notifier).updateNote(updated);
               if (context.mounted) Navigator.of(context).pop();
             },
-            child: const Text('Сохранить',
+            child:  Text('Сохранить',
                 style: TextStyle(color: AppColors.gold, fontWeight: FontWeight.w600)),
           ),
         ],

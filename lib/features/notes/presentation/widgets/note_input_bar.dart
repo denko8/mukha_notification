@@ -571,7 +571,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
                     padding: const EdgeInsets.only(left: 4, top: 6),
                     child: Row(
                       children: [
-                        const Icon(Icons.auto_awesome,
+                         Icon(Icons.auto_awesome,
                             size: 14, color: AppColors.gold),
                         const SizedBox(width: 4),
                         Text(

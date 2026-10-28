@@ -92,7 +92,7 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.notification_important_outlined,
+                  leading:  Icon(Icons.notification_important_outlined,
                       color: AppColors.gold),
                   title: const Text('Проверить уведомление'),
                   subtitle: const Text(

@@ -94,7 +94,7 @@ class _AiSettingsSectionState extends ConsumerState<AiSettingsSection> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      const Icon(Icons.shield_outlined,
+                       Icon(Icons.shield_outlined,
                           size: 16, color: AppColors.gold),
                       const SizedBox(width: 6),
                       Expanded(

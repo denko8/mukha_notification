@@ -100,7 +100,7 @@ class CategoryManageScreen extends ConsumerWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.auto_awesome,
+                 Icon(Icons.auto_awesome,
                     size: 18, color: AppColors.gold),
                 const SizedBox(width: 8),
                 Expanded(
@@ -135,7 +135,7 @@ class CategoryManageScreen extends ConsumerWidget {
           for (final custom in settings.customCategories)
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.bookmark_outline,
+              leading:  Icon(Icons.bookmark_outline,
                   color: AppColors.gold),
               title: Text(custom.label),
               subtitle: Text(

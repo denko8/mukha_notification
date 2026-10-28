@@ -35,7 +35,7 @@ class _MainScaffoldState extends State<MainScaffold> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
+        destinations:   [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home, color: AppColors.gold),
@@ -63,7 +63,7 @@ class _WebPreviewBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Material(
+    return  Material(
       color: AppColors.goldSoft,
       child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),

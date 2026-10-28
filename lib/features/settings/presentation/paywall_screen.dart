@@ -28,7 +28,7 @@ class PaywallScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
+              gradient:  LinearGradient(
                 colors: [AppColors.gold, AppColors.goldAlt],
               ),
               borderRadius: BorderRadius.circular(AppColors.radiusCard),
