@@ -30,6 +30,14 @@ dependencies:
   image_picker: ^1.1.2
   file_picker: ^8.0.6
 
+  # P2/P3 features
+  speech_to_text: ^7.0.0          # голосовой ввод
+  audioplayers: ^6.1.0            # плеер аудиовложений
+  url_launcher: ^6.3.1            # открытие ссылок/календаря
+  google_mlkit_text_recognition: ^0.15.0  # OCR (мобильные)
+  in_app_purchase: ^3.2.0         # PRO-подписка
+  app_links: ^6.3.2               # deep links семейных инвайтов
+
   # Sharing / export / invites
   share_plus: ^7.2.2
   qr_flutter: ^4.1.0

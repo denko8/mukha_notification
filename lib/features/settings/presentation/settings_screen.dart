@@ -306,7 +306,9 @@ class _SyncSectionState extends ConsumerState<_SyncSection> {
                         ? null
                         : () async {
                             setState(() => _syncing = true);
-                            await ref.read(syncServiceProvider).syncNow();
+                            // Полный цикл: имитация облачной отправки +
+                            // снятие флага pendingSync у всех заметок.
+                            await ref.read(notesNotifierProvider.notifier).syncNow();
                             if (mounted) setState(() => _syncing = false);
                           },
                   ),

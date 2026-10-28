@@ -6,6 +6,7 @@ import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
 import '../../models/note.dart';
 import '../../models/note_attachment.dart';
+import '../../models/note_category.dart';
 
 /// Карточка заметки: скругление 12px, мягкая тень (раздел 5 ТЗ).
 class NoteCard extends StatelessWidget {
@@ -95,6 +96,8 @@ class NoteCard extends StatelessWidget {
                         icon: _attachmentIcon(note.attachments.first.type),
                         label: _attachmentLabel(note.attachments),
                       ),
+                    if (note.category != NoteCategory.general)
+                      _Chip(icon: note.category.icon, label: note.category.label),
                     if (showAuthor)
                       _Chip(
                         icon: Icons.person_outline,

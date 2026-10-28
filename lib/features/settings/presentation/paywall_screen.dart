@@ -65,16 +65,41 @@ class PaywallScreen extends ConsumerWidget {
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: () async {
-              // Боевые покупки — через in_app_purchase (v1.1).
+              final billing = ref.read(billingServiceProvider);
+              final messenger = ScaffoldMessenger.of(context);
+              // На web/в тестах billing — симуляция и сразу вернёт успех.
+              final ok = await billing.purchasePro();
+              if (!ok) {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Покупка не завершена, попробуйте позже')),
+                );
+                return;
+              }
               await ref.read(settingsProvider.notifier).setPro(true);
               if (context.mounted) {
                 Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   const SnackBar(content: Text('Пробный период PRO активирован')),
                 );
               }
             },
             child: const Text('Активировать 5 дней бесплатно'),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () async {
+              final restored = await ref.read(billingServiceProvider).restorePro();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(restored
+                        ? 'Восстановление запущено'
+                        : 'Магазин недоступен на этом устройстве'),
+                  ),
+                );
+              }
+            },
+            child: const Text('Восстановить покупку'),
           ),
           const SizedBox(height: 8),
           Text(

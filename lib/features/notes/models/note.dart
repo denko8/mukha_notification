@@ -1,4 +1,5 @@
 import 'note_attachment.dart';
+import 'note_category.dart';
 
 /// Заметка. `isFamily = true` — общая семейная (раздел 2.2 ТЗ),
 /// `pendingSync = true` — создана/изменена офлайн и ждёт облачной синхронизации.
@@ -14,6 +15,7 @@ class AppNote {
   final bool done;
   final bool pendingSync;
   final List<NoteAttachment> attachments;
+  final NoteCategory category;
 
   const AppNote({
     required this.id,
@@ -27,6 +29,7 @@ class AppNote {
     this.done = false,
     this.pendingSync = true,
     this.attachments = const [],
+    this.category = NoteCategory.general,
   });
 
   bool get hasReminder => reminderAt != null;
@@ -40,6 +43,7 @@ class AppNote {
     bool? done,
     bool? pendingSync,
     List<NoteAttachment>? attachments,
+    NoteCategory? category,
     bool clearReminder = false,
   }) {
     return AppNote(
@@ -54,6 +58,7 @@ class AppNote {
       done: done ?? this.done,
       pendingSync: pendingSync ?? this.pendingSync,
       attachments: attachments ?? this.attachments,
+      category: category ?? this.category,
     );
   }
 
@@ -69,6 +74,7 @@ class AppNote {
         'done': done,
         'pendingSync': pendingSync,
         'attachments': attachments.map((a) => a.toMap()).toList(),
+        'category': category.name,
       };
 
   factory AppNote.fromMap(Map<String, dynamic> map) => AppNote(
@@ -87,5 +93,9 @@ class AppNote {
         attachments: (map['attachments'] as List<dynamic>? ?? [])
             .map((e) => NoteAttachment.fromMap(e as Map<String, dynamic>))
             .toList(),
+        category: NoteCategory.values.firstWhere(
+          (c) => c.name == map['category'],
+          orElse: () => NoteCategory.general,
+        ),
       );
 }

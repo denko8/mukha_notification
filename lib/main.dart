@@ -42,6 +42,9 @@ Future<void> main() async {
     next.whenData((_) => container.read(notesNotifierProvider.notifier).rescheduleAll());
   }, fireImmediately: true);
 
+  // Deep links семейных приглашений.
+  await container.read(deepLinkServiceProvider).start();
+
   runApp(
     UncontrolledProviderScope(
       container: container,

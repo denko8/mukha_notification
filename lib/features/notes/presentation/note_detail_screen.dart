@@ -9,13 +9,17 @@ import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/services/calendar_service.dart';
+import '../../../core/services/ocr_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/date_parser.dart';
 import '../../../core/utils/highlighted_text.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
+import '../models/note_category.dart';
 import 'note_edit_screen.dart';
+import 'widgets/audio_attachment_player.dart';
 
 class NoteDetailScreen extends ConsumerWidget {
   final String noteId;
@@ -46,6 +50,35 @@ class NoteDetailScreen extends ConsumerWidget {
     await ref.read(notesNotifierProvider.notifier).setReminder(note, when);
   }
 
+  Future<void> _pickCategory(BuildContext context, WidgetRef ref, AppNote note) async {
+    final picked = await showModalBottomSheet<NoteCategory>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Категория', style: Theme.of(ctx).textTheme.titleLarge),
+            ),
+            for (final c in NoteCategory.values)
+              ListTile(
+                leading: Icon(c.icon, color: AppColors.gold),
+                title: Text(c.label),
+                trailing: c == note.category
+                    ? const Icon(Icons.check, color: AppColors.gold)
+                    : null,
+                onTap: () => Navigator.pop(ctx, c),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) {
+      await ref.read(notesNotifierProvider.notifier).setCategory(note, picked);
+    }
+  }
+
   Future<void> _exportPdf(AppNote note) async {
     final doc = pw.Document();
     doc.addPage(
@@ -61,6 +94,7 @@ class NoteDetailScreen extends ConsumerWidget {
           pw.SizedBox(height: 12),
           pw.Text(note.text, style: const pw.TextStyle(fontSize: 14)),
           pw.SizedBox(height: 24),
+          pw.Text('Категория: ${note.category.label}'),
           if (note.reminderAt != null)
             pw.Text('Напоминание: ${DateFormatter.full(note.reminderAt!)}'),
           pw.Text('Создано: ${DateFormatter.full(note.createdAt)}'),
@@ -115,9 +149,21 @@ class NoteDetailScreen extends ConsumerWidget {
                   Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => NoteEditScreen(noteId: note.id)),
                   );
+                case 'category':
+                  await _pickCategory(context, ref, note);
+                case 'calendar':
+                  if (note.reminderAt != null) {
+                    await CalendarService.addEvent(
+                      title: note.text,
+                      start: note.reminderAt!,
+                      notes: note.text,
+                    );
+                  }
                 case 'delete':
                   await _confirmDelete(context, ref, note);
                 case 'share':
+                  // Шеринг открывает системный лист — оттуда можно выбрать
+                  // Telegram, WhatsApp, SMS и другие приложения.
                   await Share.share(
                     note.reminderAt != null
                         ? '${note.text}\nНапоминание: ${DateFormatter.full(note.reminderAt!)}'
@@ -127,11 +173,14 @@ class NoteDetailScreen extends ConsumerWidget {
                   await _exportPdf(note);
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'edit', child: Text('Редактировать')),
-              PopupMenuItem(value: 'delete', child: Text('Удалить')),
-              PopupMenuItem(value: 'share', child: Text('Поделиться')),
-              PopupMenuItem(value: 'pdf', child: Text('Экспортировать в PDF')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'edit', child: Text('Редактировать')),
+              const PopupMenuItem(value: 'category', child: Text('Изменить категорию')),
+              if (note.reminderAt != null)
+                const PopupMenuItem(value: 'calendar', child: Text('Добавить в календарь')),
+              const PopupMenuItem(value: 'share', child: Text('Поделиться (Telegram и др.)')),
+              const PopupMenuItem(value: 'pdf', child: Text('Экспортировать в PDF')),
+              const PopupMenuItem(value: 'delete', child: Text('Удалить')),
             ],
           ),
         ],
@@ -149,6 +198,14 @@ class NoteDetailScreen extends ConsumerWidget {
               onDateTap: () => _editReminder(context, ref, note),
             ),
           ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(note.category.icon, size: 18, color: AppColors.gold),
+              const SizedBox(width: 6),
+              Text(note.category.label, style: theme.textTheme.bodySmall),
+            ],
+          ),
           const SizedBox(height: 20),
 
           // Блок напоминания.
@@ -158,7 +215,8 @@ class NoteDetailScreen extends ConsumerWidget {
           if (note.attachments.isNotEmpty) ...[
             Text('Вложения', style: theme.textTheme.titleLarge),
             const SizedBox(height: 8),
-            ...note.attachments.map((a) => _AttachmentTile(attachment: a)),
+            for (final a in note.attachments)
+              _AttachmentTile(attachment: a, note: note),
             const SizedBox(height: 20),
           ],
 
@@ -242,29 +300,66 @@ class _ReminderBlock extends ConsumerWidget {
   }
 }
 
-class _AttachmentTile extends StatelessWidget {
+class _AttachmentTile extends ConsumerWidget {
   final NoteAttachment attachment;
+  final AppNote note;
 
-  const _AttachmentTile({required this.attachment});
+  const _AttachmentTile({required this.attachment, required this.note});
+
+  Future<void> _runOcr(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Распознаю текст…'), duration: Duration(seconds: 1)),
+    );
+    try {
+      final text = await ref.read(ocrServiceProvider).extractTextFromImage(attachment.path);
+      if (text.isEmpty) {
+        messenger.showSnackBar(const SnackBar(content: Text('Текст на изображении не найден')));
+        return;
+      }
+      final merged = '${note.text}\n\n[OCR]\n$text';
+      await ref.read(notesNotifierProvider.notifier).updateNote(note.copyWith(text: merged));
+      messenger.showSnackBar(const SnackBar(content: Text('Текст добавлен в заметку')));
+    } on OcrUnsupportedException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Не удалось распознать текст')),
+      );
+    }
+  }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     switch (attachment.type) {
       case AttachmentType.image:
         return Padding(
           padding: const EdgeInsets.only(bottom: 10),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppColors.radiusCard),
-            child: Image.file(
-              File(attachment.path),
-              height: 180,
-              width: double.infinity,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const ListTile(
-                leading: Icon(Icons.broken_image_outlined),
-                title: Text('Файл недоступен'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppColors.radiusCard),
+                child: Image.file(
+                  File(attachment.path),
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const ListTile(
+                    leading: Icon(Icons.broken_image_outlined),
+                    title: Text('Файл недоступен'),
+                  ),
+                ),
               ),
-            ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.document_scanner_outlined, size: 18),
+                  label: const Text('Распознать текст (OCR)'),
+                  onPressed: () => _runOcr(context, ref),
+                ),
+              ),
+            ],
           ),
         );
       case AttachmentType.pdf:
@@ -280,17 +375,9 @@ class _AttachmentTile extends StatelessWidget {
           ),
         );
       case AttachmentType.audio:
-        return Card(
-          child: ListTile(
-            leading: const Icon(Icons.audiotrack_outlined, color: AppColors.gold),
-            title: Text(attachment.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            trailing: IconButton(
-              icon: const Icon(Icons.play_circle_outline),
-              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Аудиоплеер появится в версии 1.1')),
-              ),
-            ),
-          ),
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: AudioAttachmentPlayer(path: attachment.path, name: attachment.name),
         );
       case AttachmentType.other:
         return Card(

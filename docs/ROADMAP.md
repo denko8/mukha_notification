@@ -22,23 +22,29 @@
 
 ## Приоритет 2 — v1.1
 
-- [ ] Голосовой ввод: `speech_to_text` + Google Cloud Speech-to-Text
-      (точка входа — иконка микрофона, сейчас показывает заглушку).
-- [ ] Аудиоплеер на экране деталей (пакет `audioplayers`).
-- [ ] Полноценная облачная синхронизация: Firebase Auth + Firestore по `BACKEND_SETUP.md`.
+- [x] Голосовой ввод: `speech_to_text` (микрофон в строке ввода, ru_RU,
+      на web — Web Speech API при поддержке браузера).
+- [x] Аудиоплеер на экране деталей (пакет `audioplayers`).
+- [x] In-app purchase для PRO (`in_app_purchase`), на web — симуляция.
+- [x] Deep links приглашений (`app_links`, `/invite/<token>`).
+- [x] Кнопка «Синхронизировать сейчас» реально снимает `pendingSync`.
+- [ ] Полноценная облачная синхронизация: Firebase Auth + Firestore
+      по `BACKEND_SETUP.md` (готовые реализации — `docs/firebase/`).
 - [ ] FCM-уведомления + Cloud Functions планировщик.
 - [ ] Загрузка вложений в Firebase Storage, превью первой страницы PDF.
 - [ ] Кастомный звук «тинь» как ассет (сейчас системный `SystemSoundType.alert`).
-- [ ] In-app purchase для PRO (`in_app_purchase`), экран paywall уже готов.
 
 ## Приоритет 3 — v1.2+
 
-- [ ] OCR: `google_mlkit_text_recognition` для счетов и билетов.
-- [ ] ИИ-классификация типа заметки.
-- [ ] Интеграция Apple Calendar / Google Calendar.
-- [ ] Web-версия (`flutter create --platforms=web`, проверить плагины).
-- [ ] Шаблоны заметок.
-- [ ] Синхронизация с Telegram Saved Messages.
+- [x] OCR: `google_mlkit_text_recognition` (кириллица, кнопка на фото-вложении).
+- [x] Локальная ИИ-классификация заметок (7 категорий, фильтр на Home, тесты).
+- [x] Интеграция с Google Calendar (предзаполненная форма события).
+- [x] Web-версия с in-memory хранилищем и баннером превью.
+- [x] Шаблоны заметок (6 шаблонов в меню «Опции»).
+- [~] Telegram: шеринг заметки в системный лист (выбор Telegram в один тап);
+      прямая запись в Saved Messages невозможна без MTProto-бота на бэкенде.
+- [ ] Облачный OCR через Vision API для PDF.
+- [ ] ИИ-классификация на основе LLM вместо словарной (как PRO-фича).
 
 ## Производительность (раздел 6 ТЗ) — что заложено
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,11 +11,36 @@ import '../../notes/presentation/widgets/note_input_bar.dart';
 import '../models/family_member.dart';
 import 'widgets/invite_dialog.dart';
 
-class FamilyScreen extends ConsumerWidget {
+class FamilyScreen extends ConsumerStatefulWidget {
   const FamilyScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<FamilyScreen> createState() => _FamilyScreenState();
+}
+
+class _FamilyScreenState extends ConsumerState<FamilyScreen> {
+  StreamSubscription<String>? _inviteSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _inviteSub = ref.read(deepLinkServiceProvider).inviteTokens.listen((token) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (_) => JoinInviteDialog(initialToken: token),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _inviteSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final members = ref.watch(familyNotifierProvider).valueOrNull ?? [];
     final notes = ref.watch(notesNotifierProvider).valueOrNull ?? [];
     final authorFilter = ref.watch(familyAuthorFilterProvider);

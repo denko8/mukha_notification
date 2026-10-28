@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import 'note_detail_screen.dart';
+import 'widgets/category_filter.dart';
 import 'widgets/note_feed.dart';
 import 'widgets/note_input_bar.dart';
 import 'widgets/today_header.dart';
@@ -33,6 +34,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final notes = ref.watch(notesNotifierProvider).valueOrNull ?? [];
     final dateFilter = ref.watch(homeDateFilterProvider);
     final query = ref.watch(homeSearchQueryProvider).toLowerCase();
+    final categoryFilter = ref.watch(homeCategoryFilterProvider);
 
     var visible = notes.where((n) => !n.isFamily).toList();
     if (dateFilter != null) {
@@ -40,6 +42,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           .where((n) =>
               n.reminderAt != null && _sameDay(n.reminderAt!, dateFilter))
           .toList();
+    }
+    if (categoryFilter != null) {
+      visible = visible.where((n) => n.category == categoryFilter).toList();
     }
     if (query.isNotEmpty) {
       visible = visible.where((n) => n.text.toLowerCase().contains(query)).toList();
@@ -50,6 +55,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           const TodayHeader(),
           const NoteInputBar(),
+          CategoryFilter(
+            selected: categoryFilter,
+            onChanged: (c) =>
+                ref.read(homeCategoryFilterProvider.notifier).state = c,
+          ),
+          const SizedBox(height: 4),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(

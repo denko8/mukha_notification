@@ -1,13 +1,19 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/services/billing_service.dart';
+import '../core/services/deep_link_service.dart';
 import '../core/services/json_store.dart';
 import '../core/services/notification_service.dart';
+import '../core/services/ocr_service.dart';
 import '../core/services/sync_service.dart';
+import '../core/services/voice_input_service.dart';
 import '../features/family/data/family_repository.dart';
 import '../features/family/state/family_notifier.dart';
 import '../features/notes/data/notes_repository.dart';
 import '../features/notes/models/note.dart';
+import '../features/notes/models/note_category.dart';
 import '../features/notes/state/notes_notifier.dart';
 import '../features/settings/models/app_settings.dart';
 import '../features/settings/state/settings_notifier.dart';
@@ -27,6 +33,22 @@ final notificationServiceProvider = Provider<NotificationService>(
 
 final syncServiceProvider = Provider<SyncService>(
   (ref) => LocalSyncService(),
+);
+
+final voiceInputServiceProvider = Provider<VoiceInputService>(
+  (ref) => SpeechToTextVoiceService(),
+);
+
+final ocrServiceProvider = Provider<OcrService>(
+  (ref) => kIsWeb ? NoopOcrService() : MlKitOcrService(),
+);
+
+final billingServiceProvider = Provider<BillingService>(
+  (ref) => kIsWeb ? SimulatedBillingService() : InAppPurchaseBillingService(),
+);
+
+final deepLinkServiceProvider = Provider<DeepLinkService>(
+  (ref) => DeepLinkService(),
 );
 
 final notesRepositoryProvider = Provider<NotesRepository>(
@@ -55,3 +77,4 @@ final familyNotifierProvider =
 final homeDateFilterProvider = StateProvider<DateTime?>((ref) => null);
 final familyAuthorFilterProvider = StateProvider<String?>((ref) => null);
 final homeSearchQueryProvider = StateProvider<String>((ref) => '');
+final homeCategoryFilterProvider = StateProvider<NoteCategory?>((ref) => null);

@@ -2,6 +2,7 @@ import '../../../core/services/json_store.dart';
 import '../../../core/services/notification_service.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
+import '../models/note_category.dart';
 
 /// Офлайн-first репозиторий заметок.
 ///
@@ -47,6 +48,7 @@ class NotesRepository {
     DateTime? reminderAt,
     bool isFamily = false,
     List<NoteAttachment> attachments = const [],
+    NoteCategory category = NoteCategory.general,
   }) async {
     final notes = await loadAll();
     final note = AppNote(
@@ -59,6 +61,7 @@ class NotesRepository {
       authorId: authorId,
       authorName: authorName,
       attachments: attachments,
+      category: category,
     );
     notes.insert(0, note);
     await _persist(notes);

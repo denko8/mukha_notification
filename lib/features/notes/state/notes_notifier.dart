@@ -4,6 +4,8 @@ import '../../../app/providers.dart';
 import '../../../core/utils/date_parser.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
+import '../models/note_category.dart';
+import '../utils/note_classifier.dart';
 
 class NotesNotifier extends AsyncNotifier<List<AppNote>> {
   @override
@@ -17,6 +19,7 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
     bool isFamily = false,
     DateTime? reminderOverride,
     List<NoteAttachment> attachments = const [],
+    NoteCategory? categoryOverride,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) throw ArgumentError('Заметка не может быть пустой');
@@ -25,6 +28,7 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
     final reminder = reminderOverride ?? parsed.reminderDate;
     final settings = ref.read(settingsProvider).valueOrNull;
     final authorName = settings?.profileName ?? 'Я';
+    final category = categoryOverride ?? NoteClassifier.classify(trimmed);
 
     final note = await ref.read(notesRepositoryProvider).add(
           id: ref.read(uuidProvider).v4(),
@@ -34,9 +38,29 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
           reminderAt: reminder,
           isFamily: isFamily,
           attachments: attachments,
+          category: category,
         );
     state = AsyncData([note, ...?state.valueOrNull]);
     return note;
+  }
+
+  /// Ручная смена категории (ИИ-подсказку можно переопределить).
+  Future<void> setCategory(AppNote note, NoteCategory category) =>
+      updateNote(note.copyWith(category: category));
+
+  /// Принудительная синхронизация: прогон через SyncService и снятие
+  /// флага pendingSync у переданных заметок.
+  Future<void> syncNow() async {
+    final notes = state.valueOrNull ?? await future;
+    await ref.read(syncServiceProvider).syncNow();
+    final pending = notes.where((n) => n.pendingSync).map((n) => n.id).toList();
+    if (pending.isNotEmpty) {
+      await ref.read(notesRepositoryProvider).markSynced(pending);
+      state = AsyncData([
+        for (final n in notes)
+          pending.contains(n.id) ? n.copyWith(pendingSync: false) : n,
+      ]);
+    }
   }
 
   // Имя updateNote вместо update: в riverpod 2.6+ у AsyncNotifierBase

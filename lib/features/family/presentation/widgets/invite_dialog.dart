@@ -35,63 +35,11 @@ class _InviteDialogState extends ConsumerState<InviteDialog> {
   }
 
   Future<void> _acceptByCode() async {
-    final codeController = TextEditingController();
-    final nameController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    final ok = await showDialog<bool>(
+    final joined = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Принять приглашение'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: codeController,
-                decoration: const InputDecoration(hintText: 'Код из ссылки'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите код' : null,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: nameController,
-                decoration: const InputDecoration(hintText: 'Ваше имя'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите имя' : null,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
-            },
-            child: const Text('Войти в семью'),
-          ),
-        ],
-      ),
+      builder: (_) => const JoinInviteDialog(),
     );
-
-    if (ok == true) {
-      try {
-        await ref.read(familyNotifierProvider.notifier).acceptInvite(
-              codeController.text.trim(),
-              nameController.text.trim(),
-            );
-        if (mounted) {
-          Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Новый участник добавлен в семью')),
-          );
-        }
-      } on StateError catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-        }
-      }
-    }
+    if (joined == true && mounted) Navigator.pop(context);
   }
 
   @override
@@ -149,6 +97,100 @@ class _InviteDialogState extends ConsumerState<InviteDialog> {
             },
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Диалог входа в семью по коду/токену приглашения.
+/// Используется и вручную, и при открытии deep link (токен предзаполнен).
+class JoinInviteDialog extends ConsumerStatefulWidget {
+  final String? initialToken;
+
+  const JoinInviteDialog({super.key, this.initialToken});
+
+  @override
+  ConsumerState<JoinInviteDialog> createState() => _JoinInviteDialogState();
+}
+
+class _JoinInviteDialogState extends ConsumerState<JoinInviteDialog> {
+  late final TextEditingController _codeController;
+  late final TextEditingController _nameController;
+  final _formKey = GlobalKey<FormState>();
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _codeController = TextEditingController(text: widget.initialToken ?? '');
+    _nameController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _join() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(familyNotifierProvider.notifier).acceptInvite(
+            _codeController.text.trim(),
+            _nameController.text.trim(),
+          );
+      if (mounted) {
+        Navigator.pop(context, true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Вы вступили в семью')),
+        );
+      }
+    } on StateError catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Принять приглашение'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _codeController,
+              decoration: const InputDecoration(hintText: 'Код из ссылки'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите код' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _nameController,
+              decoration: const InputDecoration(hintText: 'Ваше имя'),
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Введите имя' : null,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        ElevatedButton(
+          onPressed: _busy ? null : _join,
+          child: _busy
+              ? const SizedBox(
+                  width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Войти в семью'),
+        ),
       ],
     );
   }

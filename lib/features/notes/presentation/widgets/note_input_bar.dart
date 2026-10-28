@@ -8,10 +8,14 @@ import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
 import '../../models/note_attachment.dart';
+import '../../models/note_category.dart';
 import '../../utils/attachment_picker.dart';
+import '../../utils/note_classifier.dart';
+import '../../utils/note_templates.dart';
 
 /// Центральная строка ввода (раздел 2.1 ТЗ).
-/// Парсер в реальном времени подсвечивает даты золотистым.
+/// Парсер в реальном времени подсвечивает даты золотистым,
+/// классификатор показывает предлагаемую категорию.
 class NoteInputBar extends ConsumerStatefulWidget {
   /// На экране Family все новые заметки автоматически семейные.
   final bool forceFamily;
@@ -35,18 +39,32 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   final List<NoteAttachment> _attachments = [];
   DateParseResult _parsed = DateParseResult.empty;
   DateTime? _manualReminder;
+  NoteCategory? _manualCategory;
   late bool _isFamily = widget.forceFamily;
+  bool _listening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onControllerChanged);
+  }
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  void _onChanged(String value) {
-    setState(() => _parsed = NaturalDateParser().parse(value));
+  void _onControllerChanged() => setState(_recomputeHints);
+
+  void _recomputeHints() {
+    _parsed = NaturalDateParser().parse(_controller.text);
   }
+
+  NoteCategory get _suggestedCategory =>
+      _manualCategory ?? NoteClassifier.classify(_controller.text);
 
   Future<void> _save() async {
     final text = _controller.text.trim();
@@ -61,6 +79,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
           isFamily: _isFamily,
           reminderOverride: _manualReminder,
           attachments: List.of(_attachments),
+          categoryOverride: _suggestedCategory,
         );
 
     // Звук "тинь" + тактильный отклик (кастомный ассет подключим в v1.1).
@@ -72,12 +91,44 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
     setState(() {
       _attachments.clear();
       _manualReminder = null;
+      _manualCategory = null;
       _parsed = DateParseResult.empty;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Заметка сохранена'), duration: Duration(seconds: 1)),
+      const SnackBar(
+        content: Text('Заметка сохранена'),
+        duration: Duration(seconds: 1),
+      ),
     );
     _focusNode.requestFocus();
+  }
+
+  Future<void> _toggleVoice() async {
+    final voice = ref.read(voiceInputServiceProvider);
+    if (_listening) {
+      await voice.stopListening();
+      if (mounted) setState(() => _listening = false);
+      return;
+    }
+    final available = await voice.ensureAvailable();
+    if (!available || !mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Голосовой ввод недоступен: проверьте разрешение на микрофон'),
+        ),
+      );
+      return;
+    }
+    setState(() => _listening = true);
+    await voice.startListening(
+      onText: (spoken) {
+        final base = _controller.text.isEmpty ? '' : '${_controller.text} ';
+        _controller.text = '$base$spoken';
+      },
+      onStatus: (active) {
+        if (mounted) setState(() => _listening = active);
+      },
+    );
   }
 
   Future<void> _pickManualReminder() async {
@@ -97,6 +148,98 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       _manualReminder =
           DateTime(date.year, date.month, date.day, time.hour, time.minute);
     });
+  }
+
+  Future<void> _showOptions() async {
+    final choice = await showModalBottomSheet<_OptionAction>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.alarm_add),
+              title: const Text('Указать дату вручную'),
+              onTap: () => Navigator.pop(ctx, _OptionAction.reminder),
+            ),
+            ListTile(
+              leading: const Icon(Icons.dashboard_outlined),
+              title: const Text('Шаблон заметки'),
+              onTap: () => Navigator.pop(ctx, _OptionAction.template),
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: const Text('Выбрать категорию'),
+              onTap: () => Navigator.pop(ctx, _OptionAction.category),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    switch (choice) {
+      case _OptionAction.reminder:
+        await _pickManualReminder();
+      case _OptionAction.template:
+        await _pickTemplate();
+      case _OptionAction.category:
+        await _pickCategory();
+    }
+  }
+
+  Future<void> _pickTemplate() async {
+    final template = await showModalBottomSheet<NoteTemplate>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Шаблоны', style: Theme.of(ctx).textTheme.titleLarge),
+            ),
+            for (final t in NoteTemplates.all)
+              ListTile(
+                leading: const Icon(Icons.note_outlined, color: AppColors.gold),
+                title: Text(t.title),
+                subtitle: Text(t.text, maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () => Navigator.pop(ctx, t),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (template != null) {
+      _controller.text = template.text;
+    }
+  }
+
+  Future<void> _pickCategory() async {
+    final picked = await showModalBottomSheet<NoteCategory>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text('Категория', style: Theme.of(ctx).textTheme.titleLarge),
+            ),
+            for (final c in NoteCategory.values)
+              ListTile(
+                leading: Icon(c.icon, color: AppColors.gold),
+                title: Text(c.label),
+                trailing: c == _suggestedCategory
+                    ? const Icon(Icons.check, color: AppColors.gold)
+                    : null,
+                onTap: () => Navigator.pop(ctx, c),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) setState(() => _manualCategory = picked);
   }
 
   Future<void> _showAttachSheet() async {
@@ -145,6 +288,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final reminder = _manualReminder ?? _parsed.reminderDate;
+    final category = _suggestedCategory;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -167,7 +311,6 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                   focusNode: _focusNode,
                   minLines: 1,
                   maxLines: 4,
-                  onChanged: _onChanged,
                   style: theme.textTheme.bodyLarge,
                   decoration: const InputDecoration(
                     hintText: 'О чем напомнить?',
@@ -188,6 +331,21 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                if (_controller.text.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, top: 6),
+                    child: Row(
+                      children: [
+                        Icon(category.icon, size: 15, color: AppColors.gold),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Категория: ${category.label}',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppColors.gold),
+                        ),
+                      ],
                     ),
                   ),
                 if (reminder != null)
@@ -231,14 +389,12 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                 Row(
                   children: [
                     IconButton(
-                      tooltip: 'Голосовой ввод (v1.1)',
-                      icon: const Icon(Icons.mic_none),
-                      color: theme.colorScheme.onSurface,
-                      onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Голосовой ввод появится в версии 1.1'),
-                        ),
+                      tooltip: 'Голосовой ввод',
+                      icon: Icon(
+                        _listening ? Icons.mic : Icons.mic_none,
+                        color: _listening ? AppColors.danger : null,
                       ),
+                      onPressed: _toggleVoice,
                     ),
                     IconButton(
                       tooltip: 'Прикрепить файл',
@@ -250,7 +406,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       tooltip: 'Опции',
                       icon: const Icon(Icons.add_circle_outline),
                       color: theme.colorScheme.onSurface,
-                      onPressed: _pickManualReminder,
+                      onPressed: _showOptions,
                     ),
                     if (widget.showFamilyToggle) ...[
                       const Spacer(),
@@ -280,3 +436,4 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
 }
 
 enum _AttachChoice { camera, gallery, pdf, audio }
+enum _OptionAction { reminder, template, category }
