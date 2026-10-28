@@ -1,11 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
-import '../../../core/utils/date_parser.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
 import '../models/note_category.dart';
-import '../utils/note_classifier.dart';
 
 class NotesNotifier extends AsyncNotifier<List<AppNote>> {
   @override
@@ -24,11 +22,13 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
     final trimmed = text.trim();
     if (trimmed.isEmpty) throw ArgumentError('Заметка не может быть пустой');
 
-    final parsed = NaturalDateParser().parse(trimmed);
-    final reminder = reminderOverride ?? parsed.reminderDate;
+    // Единая точка разбора: правила либо LLM (если включено в настройках),
+    // с гарантированным фолбэком на правила внутри реализации.
+    final ai = await ref.read(aiParserProvider).parse(trimmed);
+    final reminder = reminderOverride ?? ai.reminderDate;
     final settings = ref.read(settingsProvider).valueOrNull;
     final authorName = settings?.profileName ?? 'Я';
-    final category = categoryOverride ?? NoteClassifier.classify(trimmed);
+    final category = categoryOverride ?? ai.category;
 
     final note = await ref.read(notesRepositoryProvider).add(
           id: ref.read(uuidProvider).v4(),

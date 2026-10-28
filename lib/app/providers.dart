@@ -9,6 +9,10 @@ import '../core/services/notification_service.dart';
 import '../core/services/ocr_service.dart';
 import '../core/services/sync_service.dart';
 import '../core/services/voice_input_service.dart';
+import '../features/ai/ai_reminder_parser.dart';
+import '../features/ai/llm/llm_reminder_parser.dart';
+import '../features/ai/llm/openai_compatible_client.dart';
+import '../features/ai/rule_based_ai_parser.dart';
 import '../features/family/data/family_repository.dart';
 import '../features/family/state/family_notifier.dart';
 import '../features/notes/data/notes_repository.dart';
@@ -50,6 +54,25 @@ final billingServiceProvider = Provider<BillingService>(
 final deepLinkServiceProvider = Provider<DeepLinkService>(
   (ref) => DeepLinkService(),
 );
+
+/// «Умный» разбор заметки. По умолчанию — правила; при включённом ИИ
+/// в настройках и наличии ключа — облачная LLM с фолбэком на правила.
+final aiParserProvider = Provider<AiReminderParser>((ref) {
+  const ruleParser = RuleBasedAiParser();
+  final settings = ref.watch(settingsProvider).valueOrNull;
+  final enabled = settings?.aiEnabled ?? false;
+  final key = settings?.aiApiKey ?? '';
+  if (!enabled || key.trim().isEmpty) return ruleParser;
+
+  return LlmReminderParser(
+    client: OpenAiCompatibleClient(
+      baseUrl: settings!.aiBaseUrl,
+      apiKey: key.trim(),
+      model: settings.aiModel,
+    ),
+    fallback: ruleParser,
+  );
+});
 
 final notesRepositoryProvider = Provider<NotesRepository>(
   (ref) => NotesRepository(

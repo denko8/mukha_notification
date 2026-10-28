@@ -45,4 +45,18 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
 
   Future<void> setPro(bool enabled) =>
       _save(state.value!.copyWith(proEnabled: enabled));
+
+  Future<void> toggleAi(bool enabled) =>
+      _save(state.value!.copyWith(aiEnabled: enabled));
+
+  Future<void> updateAiConfig({
+    String? apiKey,
+    String? baseUrl,
+    String? model,
+  }) =>
+      _save(state.value!.copyWith(
+        aiApiKey: apiKey,
+        aiBaseUrl: baseUrl,
+        aiModel: model,
+      ));
 }

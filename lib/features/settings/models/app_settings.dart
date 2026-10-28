@@ -22,6 +22,12 @@ class AppSettings {
   final AppFontSize fontSize;
   final bool proEnabled;
 
+  // ИИ-распознавание (облачный LLM через OpenAI-совместимый API).
+  final bool aiEnabled;
+  final String aiApiKey;
+  final String aiBaseUrl;
+  final String aiModel;
+
   const AppSettings({
     this.profileName = 'Я',
     this.email = '',
@@ -32,6 +38,10 @@ class AppSettings {
     this.themeMode = ThemeMode.light,
     this.fontSize = AppFontSize.normal,
     this.proEnabled = false,
+    this.aiEnabled = false,
+    this.aiApiKey = '',
+    this.aiBaseUrl = 'https://api.openai.com/v1',
+    this.aiModel = 'gpt-4o-mini',
   });
 
   AppSettings copyWith({
@@ -44,6 +54,10 @@ class AppSettings {
     ThemeMode? themeMode,
     AppFontSize? fontSize,
     bool? proEnabled,
+    bool? aiEnabled,
+    String? aiApiKey,
+    String? aiBaseUrl,
+    String? aiModel,
   }) {
     return AppSettings(
       profileName: profileName ?? this.profileName,
@@ -55,6 +69,10 @@ class AppSettings {
       themeMode: themeMode ?? this.themeMode,
       fontSize: fontSize ?? this.fontSize,
       proEnabled: proEnabled ?? this.proEnabled,
+      aiEnabled: aiEnabled ?? this.aiEnabled,
+      aiApiKey: aiApiKey ?? this.aiApiKey,
+      aiBaseUrl: aiBaseUrl ?? this.aiBaseUrl,
+      aiModel: aiModel ?? this.aiModel,
     );
   }
 
@@ -68,6 +86,10 @@ class AppSettings {
         'themeMode': themeMode.name,
         'fontSize': fontSize.name,
         'proEnabled': proEnabled,
+        'aiEnabled': aiEnabled,
+        'aiApiKey': aiApiKey,
+        'aiBaseUrl': aiBaseUrl,
+        'aiModel': aiModel,
       };
 
   factory AppSettings.fromMap(Map<String, dynamic> map) => AppSettings(
@@ -86,5 +108,9 @@ class AppSettings {
           orElse: () => AppFontSize.normal,
         ),
         proEnabled: map['proEnabled'] as bool? ?? false,
+        aiEnabled: map['aiEnabled'] as bool? ?? false,
+        aiApiKey: map['aiApiKey'] as String? ?? '',
+        aiBaseUrl: map['aiBaseUrl'] as String? ?? 'https://api.openai.com/v1',
+        aiModel: map['aiModel'] as String? ?? 'gpt-4o-mini',
       );
 }

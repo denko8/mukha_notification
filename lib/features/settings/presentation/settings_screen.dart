@@ -5,6 +5,7 @@ import '../../../app/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../models/app_settings.dart';
 import 'paywall_screen.dart';
+import 'widgets/ai_settings_section.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -117,6 +118,7 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
           _SyncSection(),
+          const AiSettingsSection(),
           _Section(
             title: 'О приложении',
             child: Column(
