@@ -37,6 +37,7 @@ abstract class VoiceInputService {
   Future<void> startListening({
     required void Function(String text) onText,
     required void Function(bool listening) onStatus,
+    void Function(String message)? onError,
     String localeId,
   });
   Future<void> stopListening();
@@ -110,25 +111,55 @@ class SpeechToTextVoiceService implements VoiceInputService {
   Future<void> startListening({
     required void Function(String text) onText,
     required void Function(bool listening) onStatus,
+    void Function(String message)? onError,
     String localeId = 'ru_RU',
   }) async {
     final check = await ensureAvailable();
     if (!check.ok) {
       onStatus(false);
+      onError?.call(check.technicalDetails ?? 'сервис распознавания недоступен');
       return;
     }
+
+    // Подбираем доступную локаль: запрошенную ru_RU, любой русский
+    // вариант, иначе null — системный язык по умолчанию.
+    String? effectiveLocale = localeId;
+    try {
+      final available = await _speech.locales();
+      final ids = available.map((e) => e.localeId).toList();
+      if (!ids.contains(localeId)) {
+        final ru = ids.firstWhere(
+          (id) => id.toLowerCase().startsWith('ru'),
+          orElse: () => '',
+        );
+        effectiveLocale = ru.isNotEmpty ? ru : null;
+      }
+    } catch (_) {
+      // Список локалей недоступен — оставляем запрошенную.
+    }
+
+    void handleError(SpeechRecognitionError e) {
+      onStatus(false);
+      onError?.call(e.errorMsg);
+    }
+
+    // Слушатели вешаем ДО listen(): иначе первые события статуса/ошибки
+    // (в т.ч. мгновенный отказ сервиса) теряются — кнопка «молчит».
+    _speech.statusListener = (status) =>
+        onStatus(status == SpeechToText.listeningStatus);
+    _speech.errorListener = handleError;
+
     await _speech.listen(
       onResult: (result) => onText(result.recognizedWords),
+      onError: handleError,
       // В speech_to_text 7.x listenFor/pauseFor/localeId переехали
       // из аргументов listen() в SpeechListenOptions.
       listenOptions: SpeechListenOptions(
         listenFor: const Duration(minutes: 1),
         pauseFor: const Duration(seconds: 5),
-        localeId: localeId,
+        localeId: effectiveLocale,
       ),
     );
-    _speech.statusListener = (status) =>
-        onStatus(status == SpeechToText.listeningStatus);
   }
 
   @override
@@ -144,6 +175,7 @@ class NoopVoiceService implements VoiceInputService {
   Future<void> startListening({
     required void Function(String text) onText,
     required void Function(bool listening) onStatus,
+    void Function(String message)? onError,
     String localeId = 'ru_RU',
   }) async {
     onStatus(false);

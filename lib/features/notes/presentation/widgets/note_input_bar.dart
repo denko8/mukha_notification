@@ -146,6 +146,18 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       onStatus: (active) {
         if (mounted) setState(() => _listening = active);
       },
+      onError: (message) {
+        if (!mounted) return;
+        setState(() => _listening = false);
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Не удалось распознать речь: $message. '
+              'Проверьте интернет и сервис речи в настройках системы.',
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -463,26 +475,54 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       // Flexible + ellipsis: подпись ужимается на узких
                       // экранах вместо RenderFlex overflow.
                       Flexible(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                'Семейная',
-                                style: theme.textTheme.bodySmall,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                        child: Tooltip(
+                          message:
+                              'Включите, чтобы заметку видели все члены семьи',
+                          child: GestureDetector(
+                            // Тап по иконке/подписи тоже переключает —
+                            // удобнее, чем попадать в маленький Switch.
+                            onTap: widget.forceFamily
+                                ? null
+                                : () => setState(
+                                    () => _isFamily = !_isFamily),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.groups_outlined,
+                                  size: 17,
+                                  color: _isFamily
+                                      ? AppColors.gold
+                                      : theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.65),
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    'Семейная',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontWeight: _isFamily
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                      color: _isFamily
+                                          ? AppColors.gold
+                                          : null,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Switch(
+                                  value: _isFamily,
+                                  materialTapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                  onChanged: widget.forceFamily
+                                      ? null
+                                      : (v) => setState(() => _isFamily = v),
+                                ),
+                              ],
                             ),
-                            Switch(
-                              value: _isFamily,
-                              materialTapTargetSize:
-                                  MaterialTapTargetSize.shrinkWrap,
-                              onChanged: widget.forceFamily
-                                  ? null
-                                  : (v) => setState(() => _isFamily = v),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                     ] else
