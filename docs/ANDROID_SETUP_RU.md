@@ -74,10 +74,10 @@
 ### 3.2. Core library desugaring + единый JVM target (обязательно)
 
 Нужно для `flutter_local_notifications` 17 (использует `java.time`).
-AGP 8+ по умолчанию компилирует Java в 11, поэтому и Java, и Kotlin
-выравниваем на **11** — иначе Gradle 9 падает с
-`Inconsistent JVM Target Compatibility` (в т.ч. внутри плагинов вроде
-`flutter_timezone`).
+Общая цель всего проекта — **17**: это общий знаменатель плагинов
+(`audioplayers_android` требует Java 17, остальные спокойно с 11
+поднимаются до 17). JDK 17+ в системе уже есть — на нём работает сам
+Gradle 9.
 
 #### Kotlin DSL (`android/app/build.gradle.kts`) — актуальный шаблон
 
@@ -87,12 +87,12 @@ android {
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlin {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
 }
@@ -103,7 +103,7 @@ dependencies {
 ```
 
 Важно: старый блок `kotlinOptions { jvmTarget = "1.8" }` НЕ применять —
-Kotlin 2.x считает его обособленным и конфликтует с Java 11.
+Kotlin 2.x считает его обособленным и конфликтует с Java-целью.
 
 #### Groovy (`android/app/build.gradle`), если шаблон старый
 
@@ -111,11 +111,11 @@ Kotlin 2.x считает его обособленным и конфликту�
 android {
     compileOptions {
         coreLibraryDesugaringEnabled = true
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = '11'
+        jvmTarget = '17'
     }
 }
 
@@ -124,99 +124,86 @@ dependencies {
 }
 ```
 
-### 3.3. Выравнивание JVM target во ВСЕХ модулях (если ошибка в плагине)
+### 3.3. Выравнивание JVM target во ВСЕХ модулях — блок в НАЧАЛО корневого файла
 
-Ошибки рассинхрона Java/Kotlin выглядят так:
+Разные плагины проекта зашиты под разные цели: `flutter_timezone` и
+`share_plus` — Kotlin 1.8 при Java 11, `audioplayers_android` — Java 17.
+Единый безопасный знаменатель — **17 для всех**: понижать audioplayers
+нельзя, а остальные модули спокойно поднимаются.
 
-```text
-Inconsistent JVM-target compatibility detected for tasks
-'compileDebugJavaWithJavac' (11) and 'compileDebugKotlin' (1.8)
-```
+Ключевой нюанс нового шаблона Flutter: корневой `android/build.gradle.kts`
+содержит `subprojects { project.evaluationDependsOn(":app") }`, из-за
+чего к КОНЦУ файла часть проектов уже оценена. Поэтому блок выравнивания
+нужно ставить в САМОЕ НАЧАЛО файла (сразу после `plugins { }`, если он
+есть, до `allprojects`/`evaluationDependsOn`) — тогда колбэки
+`withPlugin` регистрируются раньше оценки проектов, extension ещё не
+заморожен, а `jvmTarget` ещё не стал final.
 
-или наоборот:
+Полный список способов, которые НЕ работают на Gradle 9 / AGP 8.11:
 
-```text
-'compileDebugJavaWithJavac' (17) and 'compileDebugKotlin' (11)
-```
+1. `afterEvaluate {}` — `Cannot run Project.afterEvaluate ... when the
+   project is already evaluated`.
+2. `withPlugin("com.android.base")` в конце файла —
+   `sourceCompatibility has been finalized` (extension уже заморожен).
+3. Глобальный `jvmTarget = JVM_11` — чинит timezone, ломает audioplayers
+   (Java 17 против Kotlin 11).
+4. Правка `JavaCompile`-задач — AGP перетирает её из своего extension.
+5. `doFirst { jvmTarget.set(...) }` —
+   `The value for property 'jvmTarget' is final and cannot be changed`:
+   к запуску задачи свойство неизменяемо.
 
-Важное наблюдение: плагины проекта требуют РАЗНЫЕ цели — `flutter_timezone`
-и `share_plus` живут на 11, а `audioplayers_android` зашит под 17.
-Поэтому глобально форсить одно значение (например, всем 11) нельзя:
-модуль с Java 17 получит рассинхрон в обратную сторону. Нужно, чтобы
-Kotlin в КАЖДОМ модуле подстраивался под фактическую Java-цель этого
-модуля.
+Рабочий вариант — ранняя регистрация через `withPlugin` (Android-extension
+правим пока он не заморожен) плюс конфигурация Kotlin-задач на этапе
+конфигурации (пока `jvmTarget` не final).
 
-История граблей нового шаблона Flutter/Gradle 9 (способы, которые НЕ
-работают):
-
-1. `afterEvaluate {}` в конце корневого файла —
-   `Cannot run Project.afterEvaluate ... when the project is already
-   evaluated`: шаблон заранее форсирует оценку `:app`.
-2. Запись в `android { compileOptions { ... } }` через
-   `pluginManager.withPlugin("com.android.base")` —
-   `sourceCompatibility has been finalized`: в AGP 8.11+ extension
-   замораживается после создания вариантов.
-3. Глобальный `jvmTarget = 11` на все Kotlin-задачи — чинит один
-   плагин, но ломает второй, чья Java собрана в 17.
-4. Запись `sourceCompatibility` в `JavaCompile`-задачи из корня — AGP
-   перетирает её из своего extension позже, эффекта нет.
-
-Рабочий приём: НЕ трогаем Android-extension, а в `doFirst` Kotlin-задачи
-(он выполняется уже после полной конфигурации модуля, когда extension
-заморожен, но ЧИТАТЬ его можно) берём фактическую Java-цель и ставим
-Kotlin ровно под неё.
-
-Файл `android/build.gradle.kts` (корневой), в конец файла:
+Файл `android/build.gradle.kts` (корневой), ПЕРВЫМИ строками:
 
 ```kotlin
 subprojects {
+    // Java всех Android-модулей -> 17 (регистрация до оценки проектов,
+    // поэтому compileOptions ещё не заморожен).
+    pluginManager.withPlugin("com.android.base") {
+        extensions.configure<com.android.build.gradle.BaseExtension>("android") {
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+    }
+    // Kotlin всех модулей -> 17 на этапе конфигурации (jvmTarget ещё не final).
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java)
         .configureEach {
-            doFirst {
-                val androidExt =
-                    project.extensions.findByName("android")
-                        as? com.android.build.gradle.BaseExtension
-                // Модули без Android-extension — дефолт 11.
-                val javaVersion =
-                    androidExt?.compileOptions?.sourceCompatibility
-                        ?: JavaVersion.VERSION_11
-                val target = when (javaVersion) {
-                    JavaVersion.VERSION_17 ->
-                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
-                    JavaVersion.VERSION_21 ->
-                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
-                    else ->
-                        org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
-                }
-                compilerOptions.jvmTarget.set(target)
+            compilerOptions {
+                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             }
         }
 }
 ```
 
-Groovy-вариант (корневой `android/build.gradle`):
+Groovy-вариант (корневой `android/build.gradle`), также в начало файла:
 
 ```gradle
 subprojects {
-    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-        doFirst {
-            def androidExt = project.extensions.findByName('android')
-            def javaVersion = androidExt ?
-                androidExt.compileOptions.sourceCompatibility :
-                JavaVersion.VERSION_11
-            kotlinOptions {
-                jvmTarget = javaVersion == JavaVersion.VERSION_17 ? '17' :
-                            javaVersion == JavaVersion.VERSION_21 ? '21' : '11'
+    pluginManager.withPlugin('com.android.base') {
+        extensions.configure('android') {
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
             }
+        }
+    }
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        kotlinOptions {
+            jvmTarget = '17'
         }
     }
 }
 ```
 
 Если ранее уже был вставлен любой из нерабочих вариантов
-(`afterEvaluate`, `withPlugin("com.android.base")`, глобальный
-`jvmTarget = 11`, правка `JavaCompile`) — удалить его полностью и
-заменить этим блоком.
+(`afterEvaluate`, `withPlugin` в конце файла, глобальный `jvmTarget = 11`,
+правка `JavaCompile`, `doFirst`) — удалить его полностью, а новый блок
+разместить именно в начале файла.
 
 `minSdk` по умолчанию (21) всем плагинам проекта достаточен; если какой-то
 плагин потребует выше — поднять `minSdk` в `android/app/build.gradle.kts`
@@ -311,7 +298,7 @@ NDK r28b. В РФ автодокачка с Google-серверов часто �
 - `sdkmanager is deprecated. Android CLI will be used` — информационное
   сообщение Google, действий не требует.
 - `source value 8 is obsolete` / `target value 8 is obsolete` — это
-  последствия jvmTarget 1.8; после перехода на 11 (раздел 3.2/3.3)
+  последствия jvmTarget 1.8; после перехода на 17 (раздел 3.2/3.3)
   предупреждения исчезают.
 
 ## 7. Ошибка «Inconsistent JVM Target Compatibility»
@@ -323,36 +310,17 @@ Inconsistent JVM-target compatibility detected for tasks
 ```
 
 Причина: AGP 8+ компилирует Java по умолчанию в 11, а старые плагины
-(`flutter_timezone`, часть ML Kit/речевых) внутри своих модулей задают
-Kotlin 1.8 — новый Gradle 9 считает такое рассогласование фатальным.
-
-Лечение:
-
-1. В `android/app/build.gradle.kts` привести обе цели к 11 и включить
-   desugaring — см. раздел 3.2.
-2. В корневой `android/build.gradle.kts` добавить per-module блок
-   выравнивания Kotlin под фактическую Java-цель каждого модуля (через
-   `doFirst`, без записи в Android-extension) — см. раздел 3.3.
-   Важно: ни `afterEvaluate`, ни
-   `pluginManager.withPlugin("com.android.base")` с правкой
-   `android.compileOptions`, ни глобальный единый jvmTarget на новом
-   шаблоне не работают (см. разделы 8, 10, 11).
-3. Собрать заново:
-
-   ```powershell
-   flutter clean
-   flutter run
-   ```
+(`flutter_timezone`, `share_plus`) внутри своих модулей задают Kotlin
+1.8. Gradle 9 считает такое рассогласование фатальным. Лечится общим
+выравниванием всех модулей на 17 — раздел 3.2 (модуль `:app`) и 3.3
+(все плагины, блок в начало корневого `build.gradle.kts`).
 
 ## 8. Ошибка «Cannot run Project.afterEvaluate when the project is already evaluated»
 
-Возникает в корневом `android/build.gradle.kts`, если блок выравнивания
-JVM-целей написан через `subprojects { afterEvaluate { ... } }` и стоит
-после шаблонного `subprojects { project.evaluationDependsOn(":app") }`:
-к моменту выполнения колбэка модуль `:app` уже оценён, и регистрация
-нового `afterEvaluate` запрещена.
-
-Решение — заменить весь блок на task-level вариант из раздела 3.3.
+Возникает, если блок выравнивания с `afterEvaluate` стоит после
+шаблонного `subprojects { project.evaluationDependsOn(":app") }`: к этому
+моменту модуль `:app` уже оценён, регистрация нового `afterEvaluate`
+запрещена. Решение — блок через `withPlugin` в НАЧАЛЕ файла (раздел 3.3).
 
 ## 9. Нужно ли коммитить правки в android/?
 
@@ -366,17 +334,13 @@ JVM-целей написан через `subprojects { afterEvaluate { ... } }`
 
 ## 10. Ошибка «sourceCompatibility has been finalized»
 
-Возникает, если в корневом `android/build.gradle.kts` через
-`pluginManager.withPlugin("com.android.base")` или `afterEvaluate`
-менять `android { compileOptions { ... } }`: в AGP 8.11+ свойства
-Android-extension'а замораживаются («финализируются») сразу после
-создания вариантов сборки, и поздняя запись в них запрещена.
-
-Решение — вообще не трогать Android-extension из корневого файла,
-а конфигурировать задачи напрямую через
-`tasks.withType(KotlinCompile).configureEach` — рабочий
-сниппет в разделе 3.3. Свойства самих задач AGP не финализирует, поэтому
-такой вариант стабилен и не зависит от порядка оценки проектов.
+Возникает при попытке менять `android { compileOptions { ... } }` из
+корневого файла ПОЗДНО (в конце файла, в `afterEvaluate` или в
+`withPlugin`, когда проект уже оценён): в AGP 8.11+ свойства
+Android-extension'а замораживаются после создания вариантов. Решение —
+зарегистрировать тот же `withPlugin("com.android.base")` в НАЧАЛЕ
+корневого файла, до `evaluationDependsOn(":app")`: колбэк отработает в
+момент применения плагина, когда extension ещё не заморожен (раздел 3.3).
 
 ## 11. Обратный рассинхрон: Java 17 против Kotlin 11 (audioplayers_android)
 
@@ -386,20 +350,11 @@ Inconsistent JVM-target compatibility detected for tasks
 'compileDebugJavaWithJavac' (17) and 'compileDebugKotlin' (11).
 ```
 
-Возникает после принудительного `jvmTarget = 11` на все модули: часть
-плагинов (`flutter_timezone`, `share_plus`) действительно собрана под
-11, но `audioplayers_android` зашивает Java-цель 17. Единое глобальное
-значение неизбежно ломает одну из групп.
-
-Плюс выясняется вторая проблема: запись `sourceCompatibility` в
-`JavaCompile`-задачи из корневого файла не действует — AGP применяет
-настройки из своего extension позже и перетирает значение.
-
-Решение — per-module выравнивание в `doFirst`: Kotlin-задача читает
-фактическую (уже замороженную, но читаемую) Java-цель модуля и ставит
-себе ровно такую же. Полный сниппет — раздел 3.3. Так каждый модуль
-получает согласованную пару: 11/11 там, где Java 11, и 17/17 там, где
-Java 17.
+Возникает после принудительного `jvmTarget = 11` на все модули:
+`audioplayers_android` зашивает Java-цель 17, поэтому единое значение 11
+ломает уже его. Правильный общий знаменатель — 17 для всех модулей
+(раздел 3.3). Запись `sourceCompatibility` в `JavaCompile`-задачи при
+этом бесполезна: AGP перетирает её из своего extension.
 
 ## 12. Предупреждение про KGP-плагины (flutter_timezone, share_plus)
 
@@ -413,3 +368,13 @@ build...
 Kotlin. Собирать и выпускаться оно не мешает. На будущее — следить за
 обновлениями `flutter_timezone` и `share_plus` и обновляться по
 `flutter pub upgrade`, когда выйдут версии без KGP.
+
+## 13. Ошибка «The value for property 'jvmTarget' is final and cannot be changed»
+
+Возникает, если менять `jvmTarget` в `doFirst` Kotlin-задачи: к моменту
+запуска задачи свойство уже неизменяемо (`final`). Менять `jvmTarget`
+можно только на этапе КОНФИГУРАЦИИ — через
+`tasks.withType(KotlinCompile).configureEach { compilerOptions { ... } }`
+без оборачивания в `doFirst`. Рабочий сниппет — раздел 3.3, он ставит
+17 всем модулям на этапе конфигурации, пока свойство ещё доступно для
+записи.
