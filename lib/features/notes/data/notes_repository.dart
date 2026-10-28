@@ -104,6 +104,9 @@ class NotesRepository {
   Future<void> _schedule(AppNote note) async {
     final reminder = note.reminderAt;
     if (reminder == null) return;
+    // Прошедшие напоминания не планируем (дублируем защиту сервиса,
+    // чтобы поведение не зависело от реализации NotificationService).
+    if (!reminder.isAfter(DateTime.now())) return;
     await notifications.schedule(
       id: note.id.hashCode,
       title: 'Напоминание Smart Notes',

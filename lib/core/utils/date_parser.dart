@@ -51,22 +51,26 @@ class NaturalDateParser {
     'воскресенье': DateTime.sunday, 'вс': DateTime.sunday,
   };
 
+  // ВАЖНО: в Dart \b — граница только для ASCII (\w = [A-Za-z0-9_]),
+  // кириллица для него «не буква». Поэтому вокруг русских слов используем
+  // явные границы через lookbehind/lookahead с кириллическими классами.
+  static const String _notAfterWord = r'(?![а-яёА-ЯЁa-zA-Z0-9])';
+  static const String _notBeforeWord = r'(?<![а-яёА-ЯЁa-zA-Z0-9])';
+
   static final RegExp _compoundDuration = RegExp(
     r'через\s+(\d+)\s*час\w*\s+(\d+)\s*минут\w*',
     caseSensitive: false,
   );
   static final RegExp _duration = RegExp(
-    r'через\s+(\d+)\s*(час\w*|ч|минут\w*|мин|ден\w*|дня|дней|д)\b',
+    'через\\s+(\\d+)\\s*(час\\w*|ч|минут\\w*|мин|ден\\w*|дня|дней|д)$_notAfterWord',
     caseSensitive: false,
   );
   static final RegExp _keyword = RegExp(
-    r'(послезавтра|завтра|сегодня)\b',
+    '$_notBeforeWord(послезавтра|завтра|сегодня)$_notAfterWord',
     caseSensitive: false,
   );
-  // Внимание: это НЕ raw-строки — в них интерполируются ключи карт,
-  // поэтому обратные слэши regex экранированы двойными.
   static final RegExp _weekday = RegExp(
-    '\\b(${_weekdays.keys.join('|')})\\b',
+    '$_notBeforeWord(${_weekdays.keys.join('|')})$_notAfterWord',
     caseSensitive: false,
   );
   static final RegExp _textDate = RegExp(
@@ -74,7 +78,7 @@ class NaturalDateParser {
     caseSensitive: false,
   );
   static final RegExp _numericDate = RegExp(
-    r'\b(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b',
+    '$_notBeforeWord(\\d{1,2})[./](\\d{1,2})(?:[./](\\d{2,4}))?$_notAfterWord',
   );
   static final RegExp _noon = RegExp(r'в\s+полдень', caseSensitive: false);
   static final RegExp _midnight = RegExp(r'в\s+полночь', caseSensitive: false);
@@ -91,6 +95,7 @@ class NaturalDateParser {
     DateTime? base; // дата в 00:00
     _Time? time;
     DateTime? relative; // абсолютный момент для "через ..."
+    var isMidnight = false; // "в полночь" без даты -> наступающая полночь
 
     bool overlaps(int start, int end) =>
         consumed.any((r) => start < r.end && end > r.start);
@@ -191,6 +196,7 @@ class NaturalDateParser {
     final midnight = _midnight.firstMatch(lower);
     if (midnight != null && !overlaps(midnight.start, midnight.end)) {
       time = const _Time(0, 0);
+      isMidnight = true;
       claim(midnight);
     }
     if (time == null) {
@@ -221,7 +227,14 @@ class NaturalDateParser {
       final t = time ?? const _Time(9, 0); // дефолт 09:00 по ТЗ
       reminder = DateTime(base.year, base.month, base.day, t.hour, t.minute);
     } else if (time != null) {
-      reminder = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+      if (isMidnight) {
+        // "в полночь" без указания даты — это 00:00 следующего дня.
+        final tomorrow = _dateOnly(now).add(const Duration(days: 1));
+        reminder = DateTime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0);
+      } else {
+        reminder =
+            DateTime(now.year, now.month, now.day, time.hour, time.minute);
+      }
     }
 
     return DateParseResult(reminder, spans);
