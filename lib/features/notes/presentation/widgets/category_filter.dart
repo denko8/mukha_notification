@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/providers.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../models/note_category.dart';
+import '../../../settings/models/app_settings.dart';
+import '../../utils/category_catalog.dart';
 
 /// Горизонтальный фильтр по категориям (P3 ИИ-классификация).
-class CategoryFilter extends StatelessWidget {
-  final NoteCategory? selected;
-  final ValueChanged<NoteCategory?> onChanged;
+/// Строится из каталога: семь встроенных + пользовательские категории.
+class CategoryFilter extends ConsumerWidget {
+  final String? selected;
+  final ValueChanged<String?> onChanged;
 
   const CategoryFilter({
     super.key,
@@ -15,7 +19,11 @@ class CategoryFilter extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings =
+        ref.watch(settingsProvider).valueOrNull ?? const AppSettings();
+    final catalog = CategoryCatalog(settings.customCategories);
+
     return SizedBox(
       height: 44,
       child: ListView(
@@ -28,12 +36,12 @@ class CategoryFilter extends StatelessWidget {
             selected: selected == null,
             onTap: () => onChanged(null),
           ),
-          for (final c in NoteCategory.values)
+          for (final key in catalog.allKeys)
             _FilterChip(
-              label: c.label,
-              icon: c.icon,
-              selected: selected == c,
-              onTap: () => onChanged(c),
+              label: catalog.labelOf(key),
+              icon: catalog.iconOf(key),
+              selected: selected == key,
+              onTap: () => onChanged(key),
             ),
         ],
       ),

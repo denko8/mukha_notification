@@ -44,7 +44,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           .toList();
     }
     if (categoryFilter != null) {
-      visible = visible.where((n) => n.category == categoryFilter).toList();
+      visible =
+          visible.where((n) => n.categoryKey == categoryFilter).toList();
     }
     if (query.isNotEmpty) {
       visible = visible.where((n) => n.text.toLowerCase().contains(query)).toList();

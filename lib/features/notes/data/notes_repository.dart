@@ -2,7 +2,7 @@ import '../../../core/services/json_store.dart';
 import '../../../core/services/notification_service.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
-import '../models/note_category.dart';
+import '../models/note_category.dart' show CategoryKeys;
 
 /// Офлайн-first репозиторий заметок.
 ///
@@ -48,7 +48,7 @@ class NotesRepository {
     DateTime? reminderAt,
     bool isFamily = false,
     List<NoteAttachment> attachments = const [],
-    NoteCategory category = NoteCategory.general,
+    String categoryKey = CategoryKeys.general,
     bool aiAssisted = false,
   }) async {
     final notes = await loadAll();
@@ -62,7 +62,7 @@ class NotesRepository {
       authorId: authorId,
       authorName: authorName,
       attachments: attachments,
-      category: category,
+      categoryKey: categoryKey,
       aiAssisted: aiAssisted,
     );
     notes.insert(0, note);
@@ -92,6 +92,19 @@ class NotesRepository {
     notes.removeWhere((n) => n.id == id);
     await _persist(notes);
     await notifications.cancel(id.hashCode);
+  }
+
+  /// Переносит все заметки одной категории в другую (используется при
+  /// удалении пользовательской категории).
+  Future<int> remapCategory(String oldKey, String newKey) async {
+    final notes = await loadAll();
+    final updated = [
+      for (final n in notes)
+        n.categoryKey == oldKey ? n.copyWith(categoryKey: newKey) : n,
+    ];
+    final changed = notes.where((n) => n.categoryKey == oldKey).length;
+    if (changed > 0) await _persist(updated);
+    return changed;
   }
 
   Future<void> markSynced(List<String> ids) async {

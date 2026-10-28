@@ -6,6 +6,7 @@ import '../../../core/theme/app_colors.dart';
 import '../models/app_settings.dart';
 import 'paywall_screen.dart';
 import 'widgets/ai_settings_section.dart';
+import 'widgets/category_manage_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -115,6 +116,22 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 8),
               ],
+            ),
+          ),
+          _Section(
+            title: 'Категории',
+            child: ListTile(
+              leading: const Icon(Icons.label_outline, color: AppColors.gold),
+              title: const Text('Мои категории'),
+              subtitle: Text(settings.customCategories.isEmpty
+                  ? 'Создать свою категорию для заметок'
+                  : 'Своих категорий: ${settings.customCategories.length}'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const CategoryManageScreen(),
+                ),
+              ),
             ),
           ),
           _SyncSection(),

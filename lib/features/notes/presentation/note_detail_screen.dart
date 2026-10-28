@@ -15,11 +15,14 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/date_parser.dart';
 import '../../../core/utils/highlighted_text.dart';
+import '../../settings/models/app_settings.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
-import '../models/note_category.dart';
+import '../models/note_category.dart' show CategoryKeys;
+import '../utils/category_catalog.dart';
 import 'note_edit_screen.dart';
 import 'widgets/audio_attachment_player.dart';
+import 'widgets/category_picker_sheet.dart';
 
 class NoteDetailScreen extends ConsumerWidget {
   final String noteId;
@@ -51,35 +54,36 @@ class NoteDetailScreen extends ConsumerWidget {
   }
 
   Future<void> _pickCategory(BuildContext context, WidgetRef ref, AppNote note) async {
-    final picked = await showModalBottomSheet<NoteCategory>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Категория', style: Theme.of(ctx).textTheme.titleLarge),
-            ),
-            for (final c in NoteCategory.values)
-              ListTile(
-                leading: Icon(c.icon, color: AppColors.gold),
-                title: Text(c.label),
-                trailing: c == note.category
-                    ? const Icon(Icons.check, color: AppColors.gold)
-                    : null,
-                onTap: () => Navigator.pop(ctx, c),
-              ),
-          ],
-        ),
-      ),
+    final settings =
+        ref.read(settingsProvider).valueOrNull ?? const AppSettings();
+    final catalog = CategoryCatalog(settings.customCategories);
+    final picked = await showCategoryPickerSheet(
+      context,
+      catalog: catalog,
+      selectedKey: note.categoryKey,
     );
-    if (picked != null) {
-      await ref.read(notesNotifierProvider.notifier).setCategory(note, picked);
+    if (picked == null || !context.mounted) return;
+
+    if (picked.createRequested) {
+      final input = await showCustomCategoryDialog(context, catalog: catalog);
+      if (input == null || !context.mounted) return;
+      final created = await ref
+          .read(settingsProvider.notifier)
+          .addCustomCategory(label: input.label, keywords: input.keywords);
+      await ref
+          .read(notesNotifierProvider.notifier)
+          .setCategory(note, CategoryKeys.forCustom(created.id));
+      return;
     }
+    await ref
+        .read(notesNotifierProvider.notifier)
+        .setCategory(note, picked.categoryKey!);
   }
 
-  Future<void> _exportPdf(AppNote note) async {
+  Future<void> _exportPdf(WidgetRef ref, AppNote note) async {
+    final catalog = CategoryCatalog(
+      ref.read(settingsProvider).valueOrNull?.customCategories ?? const [],
+    );
     final doc = pw.Document();
     doc.addPage(
       pw.MultiPage(
@@ -94,7 +98,7 @@ class NoteDetailScreen extends ConsumerWidget {
           pw.SizedBox(height: 12),
           pw.Text(note.text, style: const pw.TextStyle(fontSize: 14)),
           pw.SizedBox(height: 24),
-          pw.Text('Категория: ${note.category.label}'),
+          pw.Text('Категория: ${catalog.labelOf(note.categoryKey)}'),
           if (note.reminderAt != null)
             pw.Text('Напоминание: ${DateFormatter.full(note.reminderAt!)}'),
           pw.Text('Создано: ${DateFormatter.full(note.createdAt)}'),
@@ -137,6 +141,9 @@ class NoteDetailScreen extends ConsumerWidget {
 
     final theme = Theme.of(context);
     final parsed = NaturalDateParser().parse(note.text);
+    final catalog =
+        CategoryCatalog(ref.watch(settingsProvider).valueOrNull?.customCategories ??
+            const []);
 
     return Scaffold(
       appBar: AppBar(
@@ -170,7 +177,7 @@ class NoteDetailScreen extends ConsumerWidget {
                         : note.text,
                   );
                 case 'pdf':
-                  await _exportPdf(note);
+                  await _exportPdf(ref, note);
               }
             },
             itemBuilder: (_) => [
@@ -201,9 +208,11 @@ class NoteDetailScreen extends ConsumerWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(note.category.icon, size: 18, color: AppColors.gold),
+              Icon(catalog.iconOf(note.categoryKey),
+                  size: 18, color: AppColors.gold),
               const SizedBox(width: 6),
-              Text(note.category.label, style: theme.textTheme.bodySmall),
+              Text(catalog.labelOf(note.categoryKey),
+                  style: theme.textTheme.bodySmall),
             ],
           ),
           const SizedBox(height: 20),

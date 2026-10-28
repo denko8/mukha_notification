@@ -10,10 +10,12 @@ import '../../../../core/utils/highlighted_text.dart';
 import '../../../ai/llm/ai_client_factory.dart';
 import '../../../settings/models/app_settings.dart';
 import '../../models/note_attachment.dart';
-import '../../models/note_category.dart';
+import '../../models/note_category.dart' show CategoryKeys;
 import '../../utils/attachment_picker.dart';
+import '../../utils/category_catalog.dart';
 import '../../utils/note_classifier.dart';
 import '../../utils/note_templates.dart';
+import 'category_picker_sheet.dart';
 
 /// Центральная строка ввода (раздел 2.1 ТЗ).
 /// Парсер в реальном времени подсвечивает даты золотистым,
@@ -41,7 +43,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   final List<NoteAttachment> _attachments = [];
   DateParseResult _parsed = DateParseResult.empty;
   DateTime? _manualReminder;
-  NoteCategory? _manualCategory;
+  String? _manualCategoryKey;
   late bool _isFamily = widget.forceFamily;
   bool _listening = false;
 
@@ -65,8 +67,9 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
     _parsed = NaturalDateParser().parse(_controller.text);
   }
 
-  NoteCategory get _suggestedCategory =>
-      _manualCategory ?? NoteClassifier.classify(_controller.text);
+  String _suggestedCategoryKey(AppSettings settings) =>
+      _manualCategoryKey ??
+      NoteClassifier.classifyKey(_controller.text, settings.customCategories);
 
   Future<void> _save() async {
     final text = _controller.text.trim();
@@ -76,12 +79,14 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       );
       return;
     }
+    final settings =
+        ref.read(settingsProvider).valueOrNull ?? const AppSettings();
     await ref.read(notesNotifierProvider.notifier).addFromText(
           text,
           isFamily: _isFamily,
           reminderOverride: _manualReminder,
           attachments: List.of(_attachments),
-          categoryOverride: _suggestedCategory,
+          categoryOverride: _suggestedCategoryKey(settings),
         );
 
     // Звук "тинь" + тактильный отклик (кастомный ассет подключим в v1.1).
@@ -93,7 +98,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
     setState(() {
       _attachments.clear();
       _manualReminder = null;
-      _manualCategory = null;
+      _manualCategoryKey = null;
       _parsed = DateParseResult.empty;
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -219,30 +224,29 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   }
 
   Future<void> _pickCategory() async {
-    final picked = await showModalBottomSheet<NoteCategory>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Категория', style: Theme.of(ctx).textTheme.titleLarge),
-            ),
-            for (final c in NoteCategory.values)
-              ListTile(
-                leading: Icon(c.icon, color: AppColors.gold),
-                title: Text(c.label),
-                trailing: c == _suggestedCategory
-                    ? const Icon(Icons.check, color: AppColors.gold)
-                    : null,
-                onTap: () => Navigator.pop(ctx, c),
-              ),
-          ],
-        ),
-      ),
+    final settings =
+        ref.read(settingsProvider).valueOrNull ?? const AppSettings();
+    final catalog = CategoryCatalog(settings.customCategories);
+    final picked = await showCategoryPickerSheet(
+      context,
+      catalog: catalog,
+      selectedKey: _suggestedCategoryKey(settings),
     );
-    if (picked != null) setState(() => _manualCategory = picked);
+    if (picked == null || !mounted) return;
+
+    if (picked.createRequested) {
+      final input = await showCustomCategoryDialog(context, catalog: catalog);
+      if (input == null || !mounted) return;
+      final created = await ref
+          .read(settingsProvider.notifier)
+          .addCustomCategory(label: input.label, keywords: input.keywords);
+      if (mounted) {
+        setState(() =>
+            _manualCategoryKey = CategoryKeys.forCustom(created.id));
+      }
+      return;
+    }
+    setState(() => _manualCategoryKey = picked.categoryKey);
   }
 
   Future<void> _showAttachSheet() async {
@@ -291,9 +295,10 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final reminder = _manualReminder ?? _parsed.reminderDate;
-    final category = _suggestedCategory;
     final settings = ref.watch(settingsProvider).valueOrNull ??
         const AppSettings();
+    final catalog = CategoryCatalog(settings.customCategories);
+    final categoryKey = _suggestedCategoryKey(settings);
     final aiActive = AiClientFactory.isConfigured(settings);
 
     return Padding(
@@ -360,10 +365,11 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                     padding: const EdgeInsets.only(left: 4, top: 6),
                     child: Row(
                       children: [
-                        Icon(category.icon, size: 15, color: AppColors.gold),
+                        Icon(catalog.iconOf(categoryKey),
+                            size: 15, color: AppColors.gold),
                         const SizedBox(width: 4),
                         Text(
-                          'Категория: ${category.label}',
+                          'Категория: ${catalog.labelOf(categoryKey)}',
                           style: theme.textTheme.bodySmall
                               ?.copyWith(color: AppColors.gold),
                         ),

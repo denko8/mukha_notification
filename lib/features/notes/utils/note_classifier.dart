@@ -1,12 +1,18 @@
+import '../models/custom_category.dart';
 import '../models/note_category.dart';
 
 /// Локальная ИИ-классификация типа заметки (P3 ТЗ).
 ///
 /// Без внешних API и приватных данных в облаке: взвешенный словарь
-/// ключевых слов на русском. Категория с максимальным весом побеждает,
-/// при равенстве/нуле — [NoteCategory.general].
+/// ключевых слов на русском для встроенных категорий плюс пользовательские
+/// слова для своих категорий. Категория с максимальным весом побеждает,
+/// при равенстве/нуле — [CategoryKeys.general].
 class NoteClassifier {
   const NoteClassifier._();
+
+  /// Вес ключевого слова пользовательской категории: пользователь явно
+  /// задал его как признак, поэтому сигнал сильнее обычных словарных.
+  static const int _customKeywordWeight = 3;
 
   static const Map<NoteCategory, Map<String, int>> _vocabulary = {
     NoteCategory.work: {
@@ -42,30 +48,48 @@ class NoteClassifier {
     },
   };
 
-  static NoteCategory classify(String text) {
+  /// Возвращает ключ категории (`work`, `custom:<id>`, …).
+  /// [customs] — пользовательские категории с их ключевыми словами.
+  static String classifyKey(String text, List<CustomCategory> customs) {
     final lower = text.toLowerCase();
-    final scores = <NoteCategory, int>{
-      for (final c in NoteCategory.values) c: 0,
-    };
+    // LinkedHashMap: порядок вставки = порядок перебора, поэтому при
+    // равенстве весов выигрывает ранее зарегистрированная категория.
+    final scores = <String, int>{};
 
     _vocabulary.forEach((category, words) {
+      var score = 0;
       words.forEach((stem, weight) {
         var pos = lower.indexOf(stem);
         while (pos != -1) {
-          scores[category] = scores[category]! + weight;
+          score += weight;
           pos = lower.indexOf(stem, pos + stem.length);
         }
       });
+      scores[category.name] = score;
     });
 
-    NoteCategory best = NoteCategory.general;
+    for (final custom in customs) {
+      var score = 0;
+      for (final raw in custom.keywords) {
+        final stem = raw.trim().toLowerCase();
+        if (stem.isEmpty) continue;
+        var pos = lower.indexOf(stem);
+        while (pos != -1) {
+          score += _customKeywordWeight;
+          pos = lower.indexOf(stem, pos + stem.length);
+        }
+      }
+      scores[CategoryKeys.forCustom(custom.id)] = score;
+    }
+
+    var bestKey = CategoryKeys.general;
     var bestScore = 0;
-    scores.forEach((category, score) {
+    scores.forEach((key, score) {
       if (score > bestScore) {
         bestScore = score;
-        best = category;
+        bestKey = key;
       }
     });
-    return best;
+    return bestKey;
   }
 }

@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
+import '../../../settings/models/app_settings.dart';
 import '../../models/note.dart';
 import '../../models/note_attachment.dart';
-import '../../models/note_category.dart';
+import '../../models/note_category.dart' show CategoryKeys;
+import '../../utils/category_catalog.dart';
 
 /// Карточка заметки: скругление 12px, мягкая тень (раздел 5 ТЗ).
-class NoteCard extends StatelessWidget {
+class NoteCard extends ConsumerWidget {
   final AppNote note;
   final bool showAuthor;
   final VoidCallback? onTap;
@@ -24,8 +28,11 @@ class NoteCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final settings =
+        ref.watch(settingsProvider).valueOrNull ?? const AppSettings();
+    final catalog = CategoryCatalog(settings.customCategories);
     final spans = NaturalDateParser().parse(note.text).spans;
     final baseStyle = theme.textTheme.bodyLarge!.copyWith(
       decoration: note.done ? TextDecoration.lineThrough : null,
@@ -98,8 +105,12 @@ class NoteCard extends StatelessWidget {
                       ),
                     if (note.aiAssisted)
                       const _Chip(icon: Icons.auto_awesome, label: 'ИИ'),
-                    if (note.category != NoteCategory.general)
-                      _Chip(icon: note.category.icon, label: note.category.label),
+                    if (note.categoryKey != CategoryKeys.general &&
+                        catalog.contains(note.categoryKey))
+                      _Chip(
+                        icon: catalog.iconOf(note.categoryKey),
+                        label: catalog.labelOf(note.categoryKey),
+                      ),
                     if (showAuthor)
                       _Chip(
                         icon: Icons.person_outline,

@@ -1,5 +1,5 @@
 import '../../../core/utils/date_parser.dart';
-import '../../notes/models/note_category.dart';
+import '../../notes/models/note_category.dart' show CategoryKeys;
 
 /// Результат «умного» разбора заметки.
 /// Не зависит от источника: правила, облачная LLM или on-device модель.
@@ -7,8 +7,9 @@ class AiParseResult {
   /// Предложенное время напоминания (null — напоминание не нужно).
   final DateTime? reminderDate;
 
-  /// Предложенная категория.
-  final NoteCategory category;
+  /// Предложенная категория: ключ встроенной (`work`, …) или
+  /// пользовательской (`custom:<uuid>`).
+  final String categoryKey;
 
   /// Краткая выжимка сути заметки (LLM может переформулировать).
   final String? summary;
@@ -25,7 +26,7 @@ class AiParseResult {
 
   const AiParseResult({
     this.reminderDate,
-    this.category = NoteCategory.general,
+    this.categoryKey = CategoryKeys.general,
     this.summary,
     this.confidence = 0,
     this.fromLlm = false,

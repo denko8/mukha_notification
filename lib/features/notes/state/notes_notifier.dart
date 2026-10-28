@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
-import '../models/note_category.dart';
 
 class NotesNotifier extends AsyncNotifier<List<AppNote>> {
   @override
@@ -17,7 +16,7 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
     bool isFamily = false,
     DateTime? reminderOverride,
     List<NoteAttachment> attachments = const [],
-    NoteCategory? categoryOverride,
+    String? categoryOverride,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) throw ArgumentError('Заметка не может быть пустой');
@@ -28,7 +27,7 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
     final reminder = reminderOverride ?? ai.reminderDate;
     final settings = ref.read(settingsProvider).valueOrNull;
     final authorName = settings?.profileName ?? 'Я';
-    final category = categoryOverride ?? ai.category;
+    final category = categoryOverride ?? ai.categoryKey;
 
     final note = await ref.read(notesRepositoryProvider).add(
           id: ref.read(uuidProvider).v4(),
@@ -38,7 +37,7 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
           reminderAt: reminder,
           isFamily: isFamily,
           attachments: attachments,
-          category: category,
+          categoryKey: category,
           aiAssisted: ai.fromLlm,
         );
     state = AsyncData([note, ...?state.valueOrNull]);
@@ -46,8 +45,18 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
   }
 
   /// Ручная смена категории (ИИ-подсказку можно переопределить).
-  Future<void> setCategory(AppNote note, NoteCategory category) =>
-      updateNote(note.copyWith(category: category));
+  Future<void> setCategory(AppNote note, String categoryKey) =>
+      updateNote(note.copyWith(categoryKey: categoryKey));
+
+  /// Массовый перенос заметок между категориями (после удаления своей).
+  Future<void> remapCategory(String oldKey, String newKey) async {
+    final changed = await ref
+        .read(notesRepositoryProvider)
+        .remapCategory(oldKey, newKey);
+    if (changed == 0) return;
+    final notes = await ref.read(notesRepositoryProvider).loadAll();
+    state = AsyncData(notes);
+  }
 
   /// Принудительная синхронизация: прогон через SyncService и снятие
   /// флага pendingSync у переданных заметок.

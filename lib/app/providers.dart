@@ -18,7 +18,6 @@ import '../features/family/data/family_repository.dart';
 import '../features/family/state/family_notifier.dart';
 import '../features/notes/data/notes_repository.dart';
 import '../features/notes/models/note.dart';
-import '../features/notes/models/note_category.dart';
 import '../features/notes/state/notes_notifier.dart';
 import '../features/settings/models/app_settings.dart';
 import '../features/settings/state/settings_notifier.dart';
@@ -63,13 +62,15 @@ final aiConnectionServiceProvider =
 /// в настройках и валидной конфигурации — облачная LLM (YandexGPT,
 /// GigaChat или OpenAI-совместимый провайдер) с фолбэком на правила.
 final aiParserProvider = Provider<AiReminderParser>((ref) {
-  const ruleParser = RuleBasedAiParser();
   final settings = ref.watch(settingsProvider).valueOrNull;
+  final customs = settings?.customCategories ?? const [];
+  final ruleParser = RuleBasedAiParser(customCategories: customs);
   if (settings == null || !AiClientFactory.isConfigured(settings)) {
     return ruleParser;
   }
   return LlmReminderParser(
     client: AiClientFactory.build(settings),
+    customCategories: customs,
     fallback: ruleParser,
   );
 });
@@ -100,4 +101,4 @@ final familyNotifierProvider =
 final homeDateFilterProvider = StateProvider<DateTime?>((ref) => null);
 final familyAuthorFilterProvider = StateProvider<String?>((ref) => null);
 final homeSearchQueryProvider = StateProvider<String>((ref) => '');
-final homeCategoryFilterProvider = StateProvider<NoteCategory?>((ref) => null);
+final homeCategoryFilterProvider = StateProvider<String?>((ref) => null);

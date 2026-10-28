@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../notes/models/custom_category.dart';
+
 enum AppFontSize {
   small(0.9, 'Маленький'),
   normal(1.0, 'Нормальный'),
@@ -34,6 +36,9 @@ class AppSettings {
   final String gigaChatAuthKey;
   final String gigaChatScope;
 
+  /// Пользовательские категории (в дополнение к семи встроенным).
+  final List<CustomCategory> customCategories;
+
   const AppSettings({
     this.profileName = 'Я',
     this.email = '',
@@ -52,6 +57,7 @@ class AppSettings {
     this.yandexFolderId = '',
     this.gigaChatAuthKey = '',
     this.gigaChatScope = 'GIGACHAT_API_PERS',
+    this.customCategories = const [],
   });
 
   AppSettings copyWith({
@@ -72,6 +78,7 @@ class AppSettings {
     String? yandexFolderId,
     String? gigaChatAuthKey,
     String? gigaChatScope,
+    List<CustomCategory>? customCategories,
   }) {
     return AppSettings(
       profileName: profileName ?? this.profileName,
@@ -91,6 +98,7 @@ class AppSettings {
       yandexFolderId: yandexFolderId ?? this.yandexFolderId,
       gigaChatAuthKey: gigaChatAuthKey ?? this.gigaChatAuthKey,
       gigaChatScope: gigaChatScope ?? this.gigaChatScope,
+      customCategories: customCategories ?? this.customCategories,
     );
   }
 
@@ -112,6 +120,7 @@ class AppSettings {
         'yandexFolderId': yandexFolderId,
         'gigaChatAuthKey': gigaChatAuthKey,
         'gigaChatScope': gigaChatScope,
+        'customCategories': customCategories.map((c) => c.toMap()).toList(),
       };
 
   factory AppSettings.fromMap(Map<String, dynamic> map) => AppSettings(
@@ -138,5 +147,8 @@ class AppSettings {
         yandexFolderId: map['yandexFolderId'] as String? ?? '',
         gigaChatAuthKey: map['gigaChatAuthKey'] as String? ?? '',
         gigaChatScope: map['gigaChatScope'] as String? ?? 'GIGACHAT_API_PERS',
+        customCategories: (map['customCategories'] as List<dynamic>? ?? const [])
+            .map((e) => CustomCategory.fromMap(e as Map<String, dynamic>))
+            .toList(),
       );
 }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/services/json_store.dart';
+import '../../notes/models/custom_category.dart';
 import '../models/app_settings.dart';
 
 class SettingsNotifier extends AsyncNotifier<AppSettings> {
@@ -48,6 +49,42 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
 
   Future<void> toggleAi(bool enabled) =>
       _save(state.value!.copyWith(aiEnabled: enabled));
+
+  // --- Пользовательские категории -------------------------------------
+
+  /// Создаёт категорию. Уникальность названия проверяет UI через
+  /// CategoryCatalog; здесь — защита от пустого названия.
+  Future<CustomCategory> addCustomCategory({
+    required String label,
+    List<String> keywords = const [],
+  }) async {
+    final trimmed = label.trim();
+    if (trimmed.isEmpty) throw ArgumentError('Название категории пустое');
+    final category = CustomCategory(
+      id: ref.read(uuidProvider).v4(),
+      label: trimmed,
+      keywords: keywords,
+    );
+    await _save(state.value!.copyWith(
+      customCategories: [...state.value!.customCategories, category],
+    ));
+    return category;
+  }
+
+  Future<void> updateCustomCategory(CustomCategory updated) async {
+    final list = [
+      for (final c in state.value!.customCategories)
+        c.id == updated.id ? updated : c,
+    ];
+    await _save(state.value!.copyWith(customCategories: list));
+  }
+
+  Future<void> removeCustomCategory(String id) async {
+    final list = state.value!.customCategories
+        .where((c) => c.id != id)
+        .toList(growable: false);
+    await _save(state.value!.copyWith(customCategories: list));
+  }
 
   Future<void> updateAiConfig({
     String? apiKey,

@@ -1,5 +1,5 @@
 import 'note_attachment.dart';
-import 'note_category.dart';
+import 'note_category.dart' show CategoryKeys;
 
 /// Заметка. `isFamily = true` — общая семейная (раздел 2.2 ТЗ),
 /// `pendingSync = true` — создана/изменена офлайн и ждёт облачной синхронизации.
@@ -15,7 +15,10 @@ class AppNote {
   final bool done;
   final bool pendingSync;
   final List<NoteAttachment> attachments;
-  final NoteCategory category;
+
+  /// Ключ категории: имя встроенного enum'а (`work`, …) или
+  /// `custom:<uuid>` для пользовательской. Резолвится через CategoryCatalog.
+  final String categoryKey;
 
   /// true, если дату/категорию определила облачная LLM.
   final bool aiAssisted;
@@ -32,7 +35,7 @@ class AppNote {
     this.done = false,
     this.pendingSync = true,
     this.attachments = const [],
-    this.category = NoteCategory.general,
+    this.categoryKey = CategoryKeys.general,
     this.aiAssisted = false,
   });
 
@@ -47,7 +50,7 @@ class AppNote {
     bool? done,
     bool? pendingSync,
     List<NoteAttachment>? attachments,
-    NoteCategory? category,
+    String? categoryKey,
     bool? aiAssisted,
     bool clearReminder = false,
   }) {
@@ -63,7 +66,7 @@ class AppNote {
       done: done ?? this.done,
       pendingSync: pendingSync ?? this.pendingSync,
       attachments: attachments ?? this.attachments,
-      category: category ?? this.category,
+      categoryKey: categoryKey ?? this.categoryKey,
       aiAssisted: aiAssisted ?? this.aiAssisted,
     );
   }
@@ -80,7 +83,7 @@ class AppNote {
         'done': done,
         'pendingSync': pendingSync,
         'attachments': attachments.map((a) => a.toMap()).toList(),
-        'category': category.name,
+        'category': categoryKey,
         'aiAssisted': aiAssisted,
       };
 
@@ -100,10 +103,11 @@ class AppNote {
         attachments: (map['attachments'] as List<dynamic>? ?? [])
             .map((e) => NoteAttachment.fromMap(e as Map<String, dynamic>))
             .toList(),
-        category: NoteCategory.values.firstWhere(
-          (c) => c.name == map['category'],
-          orElse: () => NoteCategory.general,
-        ),
+        // Старые заметки хранят имя enum'а — это валидный ключ; всё
+        // нестроковое/отсутствующее откатывается на «Общее».
+        categoryKey: map['category'] is String
+            ? map['category'] as String
+            : CategoryKeys.general,
         aiAssisted: map['aiAssisted'] as bool? ?? false,
       );
 }
