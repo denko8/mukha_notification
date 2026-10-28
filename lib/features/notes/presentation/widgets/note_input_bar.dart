@@ -7,6 +7,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
+import '../../../../core/services/voice_input_service.dart';
 import '../../../ai/llm/ai_client_factory.dart';
 import '../../../settings/models/app_settings.dart';
 import '../../models/note_attachment.dart';
@@ -118,13 +119,22 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
-    final available = await voice.ensureAvailable();
-    if (!available || !mounted) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('Голосовой ввод недоступен: проверьте разрешение на микрофон'),
-        ),
-      );
+    final check = await voice.ensureAvailable();
+    if (!check.ok || !mounted) {
+      final message = switch (check.availability) {
+        VoiceAvailability.permissionDenied =>
+          'Нет доступа к микрофону: Настройки телефона → Приложения → '
+              'Smart Notes → Разрешения → Микрофон',
+        VoiceAvailability.noRecognitionService =>
+          'Сервис распознавания речи не найден. Установите приложение '
+              'Google и «Синтезатор речи Google», затем проверьте '
+              'интернет и попробуйте снова',
+        VoiceAvailability.unavailable =>
+          'Голосовой ввод сейчас недоступен'
+              '${check.technicalDetails != null ? ': ${check.technicalDetails}' : ''}',
+        VoiceAvailability.available => '',
+      };
+      messenger.showSnackBar(SnackBar(content: Text(message)));
       return;
     }
     setState(() => _listening = true);
@@ -418,6 +428,10 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                   children: [
                     IconButton(
                       tooltip: 'Голосовой ввод',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                          minWidth: 40, minHeight: 40),
+                      padding: const EdgeInsets.all(6),
                       icon: Icon(
                         _listening ? Icons.mic : Icons.mic_none,
                         color: _listening ? AppColors.danger : null,
@@ -426,29 +440,59 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                     ),
                     IconButton(
                       tooltip: 'Прикрепить файл',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                          minWidth: 40, minHeight: 40),
+                      padding: const EdgeInsets.all(6),
                       icon: const Icon(Icons.attach_file),
                       color: theme.colorScheme.onSurface,
                       onPressed: _showAttachSheet,
                     ),
                     IconButton(
                       tooltip: 'Опции',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                          minWidth: 40, minHeight: 40),
+                      padding: const EdgeInsets.all(6),
                       icon: const Icon(Icons.add_circle_outline),
                       color: theme.colorScheme.onSurface,
                       onPressed: _showOptions,
                     ),
                     if (widget.showFamilyToggle) ...[
                       const Spacer(),
-                      Text('Семейная', style: theme.textTheme.bodySmall),
-                      Switch(
-                        value: _isFamily,
-                        onChanged: widget.forceFamily
-                            ? null
-                            : (v) => setState(() => _isFamily = v),
+                      // Flexible + ellipsis: подпись ужимается на узких
+                      // экранах вместо RenderFlex overflow.
+                      Flexible(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                'Семейная',
+                                style: theme.textTheme.bodySmall,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Switch(
+                              value: _isFamily,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              onChanged: widget.forceFamily
+                                  ? null
+                                  : (v) => setState(() => _isFamily = v),
+                            ),
+                          ],
+                        ),
                       ),
                     ] else
                       const Spacer(),
                     IconButton(
                       tooltip: 'Сохранить',
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(
+                          minWidth: 40, minHeight: 40),
+                      padding: const EdgeInsets.all(6),
                       icon: const Icon(Icons.send, color: AppColors.gold),
                       onPressed: _save,
                     ),
