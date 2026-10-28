@@ -17,6 +17,9 @@ class AppNote {
   final List<NoteAttachment> attachments;
   final NoteCategory category;
 
+  /// true, если дату/категорию определила облачная LLM.
+  final bool aiAssisted;
+
   const AppNote({
     required this.id,
     required this.text,
@@ -30,6 +33,7 @@ class AppNote {
     this.pendingSync = true,
     this.attachments = const [],
     this.category = NoteCategory.general,
+    this.aiAssisted = false,
   });
 
   bool get hasReminder => reminderAt != null;
@@ -44,6 +48,7 @@ class AppNote {
     bool? pendingSync,
     List<NoteAttachment>? attachments,
     NoteCategory? category,
+    bool? aiAssisted,
     bool clearReminder = false,
   }) {
     return AppNote(
@@ -59,6 +64,7 @@ class AppNote {
       pendingSync: pendingSync ?? this.pendingSync,
       attachments: attachments ?? this.attachments,
       category: category ?? this.category,
+      aiAssisted: aiAssisted ?? this.aiAssisted,
     );
   }
 
@@ -75,6 +81,7 @@ class AppNote {
         'pendingSync': pendingSync,
         'attachments': attachments.map((a) => a.toMap()).toList(),
         'category': category.name,
+        'aiAssisted': aiAssisted,
       };
 
   factory AppNote.fromMap(Map<String, dynamic> map) => AppNote(
@@ -97,5 +104,6 @@ class AppNote {
           (c) => c.name == map['category'],
           orElse: () => NoteCategory.general,
         ),
+        aiAssisted: map['aiAssisted'] as bool? ?? false,
       );
 }

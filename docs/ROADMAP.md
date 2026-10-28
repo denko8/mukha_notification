@@ -44,10 +44,14 @@
 - [~] Telegram: шеринг заметки в системный лист (выбор Telegram в один тап);
       прямая запись в Saved Messages невозможна без MTProto-бота на бэкенде.
 - [ ] Облачный OCR через Vision API для PDF.
-- [x] Гибридный ИИ-парсер: LLM через OpenAI-совместимый API с фолбэком
-      на правила, настройки провайдера в UI (`docs/AI_INTEGRATION.md`).
+- [x] Гибридный ИИ-парсер: LLM с фолбэком на правила, настройки
+      провайдера в UI (`docs/AI_INTEGRATION.md`).
+- [x] Нативные клиенты YandexGPT (Api-Key + Folder ID) и GigaChat
+      (OAuth с кэшем токена), кнопка проверки подключения
+      (`docs/AI_PROVIDERS_YANDEX_GIGACHAT.md`).
 - [ ] On-device LLM (MediaPipe/llama.cpp) как реализация AiReminderParser
       без облака и ключей.
+- [ ] Бандл сертификата Минцифры для прямых запросов GigaChat без шлюза.
 
 ## Производительность (раздел 6 ТЗ) — что заложено
 

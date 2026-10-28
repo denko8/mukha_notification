@@ -9,9 +9,10 @@ import '../core/services/notification_service.dart';
 import '../core/services/ocr_service.dart';
 import '../core/services/sync_service.dart';
 import '../core/services/voice_input_service.dart';
+import '../features/ai/ai_connection_service.dart';
 import '../features/ai/ai_reminder_parser.dart';
+import '../features/ai/llm/ai_client_factory.dart';
 import '../features/ai/llm/llm_reminder_parser.dart';
-import '../features/ai/llm/openai_compatible_client.dart';
 import '../features/ai/rule_based_ai_parser.dart';
 import '../features/family/data/family_repository.dart';
 import '../features/family/state/family_notifier.dart';
@@ -55,21 +56,20 @@ final deepLinkServiceProvider = Provider<DeepLinkService>(
   (ref) => DeepLinkService(),
 );
 
+final aiConnectionServiceProvider =
+    Provider<AiConnectionService>((ref) => AiConnectionService());
+
 /// «Умный» разбор заметки. По умолчанию — правила; при включённом ИИ
-/// в настройках и наличии ключа — облачная LLM с фолбэком на правила.
+/// в настройках и валидной конфигурации — облачная LLM (YandexGPT,
+/// GigaChat или OpenAI-совместимый провайдер) с фолбэком на правила.
 final aiParserProvider = Provider<AiReminderParser>((ref) {
   const ruleParser = RuleBasedAiParser();
   final settings = ref.watch(settingsProvider).valueOrNull;
-  final enabled = settings?.aiEnabled ?? false;
-  final key = settings?.aiApiKey ?? '';
-  if (!enabled || key.trim().isEmpty) return ruleParser;
-
+  if (settings == null || !AiClientFactory.isConfigured(settings)) {
+    return ruleParser;
+  }
   return LlmReminderParser(
-    client: OpenAiCompatibleClient(
-      baseUrl: settings!.aiBaseUrl,
-      apiKey: key.trim(),
-      model: settings.aiModel,
-    ),
+    client: AiClientFactory.build(settings),
     fallback: ruleParser,
   );
 });

@@ -96,6 +96,8 @@ class NoteCard extends StatelessWidget {
                         icon: _attachmentIcon(note.attachments.first.type),
                         label: _attachmentLabel(note.attachments),
                       ),
+                    if (note.aiAssisted)
+                      const _Chip(icon: Icons.auto_awesome, label: 'ИИ'),
                     if (note.category != NoteCategory.general)
                       _Chip(icon: note.category.icon, label: note.category.label),
                     if (showAuthor)

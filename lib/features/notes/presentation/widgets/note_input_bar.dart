@@ -7,6 +7,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/utils/date_parser.dart';
 import '../../../../core/utils/highlighted_text.dart';
+import '../../../ai/llm/ai_client_factory.dart';
+import '../../../settings/models/app_settings.dart';
 import '../../models/note_attachment.dart';
 import '../../models/note_category.dart';
 import '../../utils/attachment_picker.dart';
@@ -290,6 +292,9 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
     final theme = Theme.of(context);
     final reminder = _manualReminder ?? _parsed.reminderDate;
     final category = _suggestedCategory;
+    final settings = ref.watch(settingsProvider).valueOrNull ??
+        const AppSettings();
+    final aiActive = AiClientFactory.isConfigured(settings);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -332,6 +337,22 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                if (aiActive)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, top: 6),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.auto_awesome,
+                            size: 14, color: AppColors.gold),
+                        const SizedBox(width: 4),
+                        Text(
+                          'ИИ-распознавание активно',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: AppColors.gold),
+                        ),
+                      ],
                     ),
                   ),
                 if (_controller.text.isNotEmpty)

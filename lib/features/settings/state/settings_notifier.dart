@@ -53,10 +53,18 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
     String? apiKey,
     String? baseUrl,
     String? model,
+    String? provider,
+    String? yandexFolderId,
+    String? gigaChatAuthKey,
+    String? gigaChatScope,
   }) =>
       _save(state.value!.copyWith(
         aiApiKey: apiKey,
         aiBaseUrl: baseUrl,
         aiModel: model,
+        aiProvider: provider,
+        yandexFolderId: yandexFolderId,
+        gigaChatAuthKey: gigaChatAuthKey,
+        gigaChatScope: gigaChatScope,
       ));
 }

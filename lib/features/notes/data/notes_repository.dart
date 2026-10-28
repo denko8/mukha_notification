@@ -49,6 +49,7 @@ class NotesRepository {
     bool isFamily = false,
     List<NoteAttachment> attachments = const [],
     NoteCategory category = NoteCategory.general,
+    bool aiAssisted = false,
   }) async {
     final notes = await loadAll();
     final note = AppNote(
@@ -62,6 +63,7 @@ class NotesRepository {
       authorName: authorName,
       attachments: attachments,
       category: category,
+      aiAssisted: aiAssisted,
     );
     notes.insert(0, note);
     await _persist(notes);

@@ -22,11 +22,17 @@ class AppSettings {
   final AppFontSize fontSize;
   final bool proEnabled;
 
-  // ИИ-распознавание (облачный LLM через OpenAI-совместимый API).
+  // ИИ-распознавание (облачный LLM).
   final bool aiEnabled;
+  final String aiProvider; // имя AiProvider
   final String aiApiKey;
   final String aiBaseUrl;
   final String aiModel;
+  // YandexGPT
+  final String yandexFolderId;
+  // GigaChat
+  final String gigaChatAuthKey;
+  final String gigaChatScope;
 
   const AppSettings({
     this.profileName = 'Я',
@@ -39,9 +45,13 @@ class AppSettings {
     this.fontSize = AppFontSize.normal,
     this.proEnabled = false,
     this.aiEnabled = false,
+    this.aiProvider = 'openaiCompatible',
     this.aiApiKey = '',
     this.aiBaseUrl = 'https://api.openai.com/v1',
     this.aiModel = 'gpt-4o-mini',
+    this.yandexFolderId = '',
+    this.gigaChatAuthKey = '',
+    this.gigaChatScope = 'GIGACHAT_API_PERS',
   });
 
   AppSettings copyWith({
@@ -55,9 +65,13 @@ class AppSettings {
     AppFontSize? fontSize,
     bool? proEnabled,
     bool? aiEnabled,
+    String? aiProvider,
     String? aiApiKey,
     String? aiBaseUrl,
     String? aiModel,
+    String? yandexFolderId,
+    String? gigaChatAuthKey,
+    String? gigaChatScope,
   }) {
     return AppSettings(
       profileName: profileName ?? this.profileName,
@@ -70,9 +84,13 @@ class AppSettings {
       fontSize: fontSize ?? this.fontSize,
       proEnabled: proEnabled ?? this.proEnabled,
       aiEnabled: aiEnabled ?? this.aiEnabled,
+      aiProvider: aiProvider ?? this.aiProvider,
       aiApiKey: aiApiKey ?? this.aiApiKey,
       aiBaseUrl: aiBaseUrl ?? this.aiBaseUrl,
       aiModel: aiModel ?? this.aiModel,
+      yandexFolderId: yandexFolderId ?? this.yandexFolderId,
+      gigaChatAuthKey: gigaChatAuthKey ?? this.gigaChatAuthKey,
+      gigaChatScope: gigaChatScope ?? this.gigaChatScope,
     );
   }
 
@@ -87,9 +105,13 @@ class AppSettings {
         'fontSize': fontSize.name,
         'proEnabled': proEnabled,
         'aiEnabled': aiEnabled,
+        'aiProvider': aiProvider,
         'aiApiKey': aiApiKey,
         'aiBaseUrl': aiBaseUrl,
         'aiModel': aiModel,
+        'yandexFolderId': yandexFolderId,
+        'gigaChatAuthKey': gigaChatAuthKey,
+        'gigaChatScope': gigaChatScope,
       };
 
   factory AppSettings.fromMap(Map<String, dynamic> map) => AppSettings(
@@ -109,8 +131,12 @@ class AppSettings {
         ),
         proEnabled: map['proEnabled'] as bool? ?? false,
         aiEnabled: map['aiEnabled'] as bool? ?? false,
+        aiProvider: map['aiProvider'] as String? ?? 'openaiCompatible',
         aiApiKey: map['aiApiKey'] as String? ?? '',
         aiBaseUrl: map['aiBaseUrl'] as String? ?? 'https://api.openai.com/v1',
         aiModel: map['aiModel'] as String? ?? 'gpt-4o-mini',
+        yandexFolderId: map['yandexFolderId'] as String? ?? '',
+        gigaChatAuthKey: map['gigaChatAuthKey'] as String? ?? '',
+        gigaChatScope: map['gigaChatScope'] as String? ?? 'GIGACHAT_API_PERS',
       );
 }

@@ -39,6 +39,7 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
           isFamily: isFamily,
           attachments: attachments,
           category: category,
+          aiAssisted: ai.fromLlm,
         );
     state = AsyncData([note, ...?state.valueOrNull]);
     return note;
