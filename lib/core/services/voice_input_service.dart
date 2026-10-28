@@ -43,7 +43,7 @@ abstract class VoiceInputService {
   Future<void> stopListening();
 }
 
-/// Реализация на speech_to_text. Работает на Android, iOS и web
+/// Реализация на speech_to_text 7.x. Работает на Android, iOS и web
 /// (в браузере — через Web Speech API, поддержка зависит от браузера).
 class SpeechToTextVoiceService implements VoiceInputService {
   final SpeechToText _speech = SpeechToText();
@@ -138,27 +138,27 @@ class SpeechToTextVoiceService implements VoiceInputService {
       // Список локалей недоступен — оставляем запрошенную.
     }
 
-    void handleError(SpeechRecognitionError e) {
+    // В API speech_to_text 7.x у listen() нет параметра onError:
+    // ошибки и статус приходят через публичные поля errorListener и
+    // statusListener. Назначаем их ДО listen() — иначе первые события
+    // (в т.ч. мгновенный отказ сервиса) теряются и кнопка «молчит».
+    // Тип аргумента берём из публичного typedef SpeechErrorListener,
+    // сам класс SpeechRecognitionError пакетом не экспортируется.
+    final SpeechErrorListener errorHandler = (error) {
       onStatus(false);
-      onError?.call(e.errorMsg);
-    }
-
-    // Слушатели вешаем ДО listen(): иначе первые события статуса/ошибки
-    // (в т.ч. мгновенный отказ сервиса) теряются — кнопка «молчит».
-    _speech.statusListener = (status) =>
-        onStatus(status == SpeechToText.listeningStatus);
-    _speech.errorListener = handleError;
+      onError?.call(error.errorMsg);
+    };
+    _speech.errorListener = errorHandler;
+    _speech.statusListener =
+        (status) => onStatus(status == SpeechToText.listeningStatus);
 
     await _speech.listen(
       onResult: (result) => onText(result.recognizedWords),
-      onError: handleError,
-      // В speech_to_text 7.x listenFor/pauseFor/localeId переехали
-      // из аргументов listen() в SpeechListenOptions.
-      listenOptions: SpeechListenOptions(
-        listenFor: const Duration(minutes: 1),
-        pauseFor: const Duration(seconds: 5),
-        localeId: effectiveLocale,
-      ),
+      // listenFor/pauseFor/localeId в 7.x остаются именованными
+      // параметрами listen() (в SpeechListenOptions их нет).
+      listenFor: const Duration(minutes: 1),
+      pauseFor: const Duration(seconds: 5),
+      localeId: effectiveLocale,
     );
   }
 
