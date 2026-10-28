@@ -56,11 +56,17 @@ flutter test
 
 ### Разрешения, которые нужно добавить в платформенные проекты
 
+Полный пошаговый запуск на Android (Android Studio, эмулятор/телефон,
+правки Gradle с desugaring) — [docs/ANDROID_SETUP_RU.md](docs/ANDROID_SETUP_RU.md).
+
 **Android** (`android/app/src/main/AndroidManifest.xml`):
 ```xml
+<uses-permission android:name="android.permission.INTERNET"/>
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+<uses-permission android:name="android.permission.VIBRATE"/>
 <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 ```
 
