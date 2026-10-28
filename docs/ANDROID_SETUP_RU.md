@@ -425,11 +425,20 @@ A problem occurred configuring project ':vosk_flutter'.
 (в master namespace уже добавлен, но новый релиз на pub.dev не
 выложен), а у вас AGP 8+ (compileSdk 36, Gradle 9). AGP 8 не умеет
 брать namespace из атрибута `package` манифеста — его нужно
-проставить в Gradle. Чинить файлы в pub-кэше руками нельзя:
-`flutter pub get`/`cache repair` их перезапишет. Решение — тот же
-**корневой `android/build.gradle.kts`**, где уже стоит блок из
-раздела 3.3 (JVM 17, compileSdk 36). Дополните его `afterEvaluate`
-инъекцией namespace (KTS):
+проставить в Gradle. Решение — тот же **корневой
+`android/build.gradle.kts`**, где уже стоит блок из раздела 3.3
+(JVM 17, compileSdk 36). Дополните его `afterEvaluate` инъекцией
+namespace.
+
+ВАЖНО: скрипт только ЧИТАЕТ манифест в pub-кэше, но никогда его не
+перезаписывает. Ранняя версия этого рецепта удаляла атрибут `package`
+прямо в кэше — первая сборка проходила, но правка оставалась на диске
+(`flutter clean` кэш не чистит), и все следующие сборки снова падали
+с той же ошибкой: брать namespace уже было неоткуда. Ниже —
+идемпототентный вариант с жёстким фолбэком, который чинит и уже
+испорченный кэш.
+
+KTS, полный совмещённый блок:
 
 ```kotlin
 subprojects {
@@ -447,33 +456,26 @@ subprojects {
             }
         }
 
-        // === добавить ЭТУ ЧАСТЬ — namespace легаси-плагинов (AGP 8+) ===
+        // === namespace легаси-плагинов без него в build.gradle (AGP 8+) ===
         if (plugins.hasPlugin("com.android.library")) {
             extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
                 if (namespace == null) {
-                    val manifestFile =
-                        sourceSets.getByName("main").manifest.srcFile
-                    val original = manifestFile.readText()
-                    val pkg = Regex("""package="([^"]+)"""").find(original)
-                        ?.groupValues?.get(1)
-                    if (pkg != null) {
-                        namespace = pkg
-                        // AGP 8 в части версий дополнительно ругается на
-                        // сам атрибут package в манифесте библиотеки —
-                        // удаляем его; R-класс плагина сохраняет пакет
-                        // org.vosk.vosk_flutter через namespace.
-                        manifestFile.writeText(
-                            original.replace(
-                                Regex("""\s*package="[^"]+""""),
-                                "",
-                            ),
-                            Charsets.UTF_8,
-                        )
-                    }
+                    // 1) основной путь: пакет из манифеста плагина (read-only!)
+                    val manifestFile = sourceSets.getByName("main").manifest.srcFile
+                    val fromManifest = if (manifestFile.exists()) {
+                        Regex("""package="([^"]+)"""")
+                            .find(manifestFile.readText())
+                            ?.groupValues?.get(1)
+                    } else null
+                    // 2) фолбэк: манифест в pub-кэше мог быть изменён
+                    //    прежней версией скрипта — тогда пакет известен явно.
+                    val knownNamespaces = mapOf(
+                        ":vosk_flutter" to "org.vosk.vosk_flutter",
+                    )
+                    namespace = fromManifest ?: knownNamespaces[project.path]
                 }
             }
         }
-        // === конец добавки ===
 
         tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java)
             .configureEach {
@@ -502,15 +504,15 @@ subprojects {
             extensions.configure('android') { android ->
                 if (android.namespace == null) {
                     def manifestFile = android.sourceSets.main.manifest.srcFile
-                    def original = manifestFile.getText('UTF-8')
-                    def matcher = (original =~ /package="([^"]+)"/)
-                    if (matcher.find()) {
-                        android.namespace = matcher.group(1)
-                        manifestFile.write(
-                            original.replaceAll(/\s*package="[^"]+"/, ''),
-                            'UTF-8',
-                        )
+                    def fromManifest = null
+                    if (manifestFile.exists()) {
+                        def matcher = (manifestFile.getText('UTF-8') =~ /package="([^"]+)"/)
+                        if (matcher.find()) fromManifest = matcher.group(1)
                     }
+                    def knownNamespaces = [
+                        ':vosk_flutter': 'org.vosk.vosk_flutter',
+                    ]
+                    android.namespace = fromManifest ?: knownNamespaces[project.path]
                 }
             }
         }
@@ -522,9 +524,21 @@ subprojects {
 ```
 
 Блок универсален: сработает для любого плагина без namespace, а не
-только для Vosk. Правка манифеста в pub-кэше происходит на этапе
-конфигурации и повторяется при каждой сборке, поэтому переживает
-`flutter pub get` и переустановку пакетов. После правки:
+только для Vosk, и не меняет файлы в pub-кэше — поэтому повторные
+сборки и `flutter pub get` его не ломают.
+
+#### Если кэш уже испорчен прошлой версией скрипта
+
+Фолбэк с явным пакетом покрывает этот случай, но для чистоты можно
+восстановить исходный манифест плагина — удалить каталог пакета и
+заново подтянуть зависимости:
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Pub\Cache\hosted\pub.dev\vosk_flutter-0.3.48"
+flutter pub get
+```
+
+После правки:
 
 ```
 flutter clean
