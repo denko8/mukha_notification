@@ -123,6 +123,16 @@ void main() {
       expect(result.reminderDate, isNull);
     });
 
+    test('названия еды во множественном числе и глаголы не дают дату', () {
+      expect(parser().parseReminder('заказать обеды на работу'), isNull);
+      expect(parser().parseReminder('два ужина в ресторане'), isNull);
+      expect(parser().parseReminder('где будем ужинать'), isNull);
+      expect(parser().parseReminder('хочу позавтракать дома'), isNull);
+      expect(parser().parseReminder('рецепт ужина'), isNull);
+      final spans = parser().parse('Купить завтраки в магазине').spans;
+      expect(spans, isEmpty);
+    });
+
     test('границы не мешают обычным формулировкам', () {
       expect(
         parser().parseReminder('позвонить завтра'),
@@ -168,6 +178,12 @@ void main() {
     test('"с утра" и "под вечер"', () {
       expect(parser().parseReminder('Собраться с утра'), DateTime(2024, 12, 5, 9, 0));
       expect(parser().parseReminder('Созвон под вечер'), DateTime(2024, 12, 5, 19, 0));
+    });
+
+    test('родительный падеж приёмов пищи работает с предлогом "до"', () {
+      expect(parser().parseReminder('успеть до обеда'), DateTime(2024, 12, 5, 13, 0));
+      expect(parser().parseReminder('отчёт до ужина'), DateTime(2024, 12, 5, 20, 0));
+      expect(parser().parseReminder('позвонить до завтрака'), DateTime(2024, 12, 5, 8, 0));
     });
 
     test('явное время важнее времени суток', () {
