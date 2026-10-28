@@ -99,6 +99,31 @@ void main() {
     });
   });
 
+  group('NaturalDateParser — кириллические границы слов (регрессия на \\b)', () {
+    test('"завтра" внутри слова "завтраки" не распознаётся как дата', () {
+      // Ключевое слово является частью другого слова -> даты нет.
+      final result = parser().parse('Купить завтраки в магазине');
+      expect(result.reminderDate, isNull);
+      expect(result.spans, isEmpty);
+    });
+
+    test('"пятницу" внутри более длинного слова не ловим', () {
+      final result = parser().parse('пятничную встречу перенести');
+      expect(result.reminderDate, isNull);
+    });
+
+    test('границы не мешают обычным формулировкам', () {
+      expect(
+        parser().parseReminder('позвонить завтра'),
+        DateTime(2024, 12, 6, 9, 0),
+      );
+      expect(
+        parser().parseReminder('через 5 минут выйти'),
+        DateTime(2024, 12, 5, 10, 5),
+      );
+    });
+  });
+
   group('NaturalDateParser — подсветка', () {
     test('возвращает span-ы найденных фрагментов', () {
       final result = parser().parse('завтра в 14:00');
