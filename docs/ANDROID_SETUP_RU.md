@@ -130,27 +130,33 @@ dependencies {
 `compileDebugJavaWithJavac (11) ... compileDebugKotlin (1.8)` в модуле
 `:flutter_timezone` (или другом плагине) означает: свой `build.gradle`
 плагина зашит под 1.8, а Java вокруг уже 11. Принудительно выравниваем
-все подпроекты. Файл `android/build.gradle.kts` (корневой), добавить
-в конец файла:
+все подпроекты.
+
+ВАЖНО: вариант через `afterEvaluate {}`, дописанный в конец корневого
+`build.gradle.kts`, на новых шаблонах Flutter падает с
+`Cannot run Project.afterEvaluate ... when the project is already
+evaluated` — шаблон заранее форсирует оценку `:app`. Поэтому используем
+`pluginManager.withPlugin`: его колбэк срабатывает и для уже применённых
+плагинов, и для будущих, а от места вставки не зависит.
+
+Файл `android/build.gradle.kts` (корневой), в конец файла:
 
 ```kotlin
 subprojects {
-    afterEvaluate {
-        // Java-цели всех Android-модулей -> 11
-        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
+    pluginManager.withPlugin("com.android.base") {
+        extensions.configure<com.android.build.gradle.BaseExtension>("android") {
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_11
                 targetCompatibility = JavaVersion.VERSION_11
             }
         }
-        // Kotlin-цели всех модулей -> 11
-        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java)
-            .configureEach {
-                compilerOptions {
-                    jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
-                }
-            }
     }
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile::class.java)
+        .configureEach {
+            compilerOptions {
+                jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+            }
+        }
 }
 ```
 
@@ -158,22 +164,24 @@ Groovy-вариант (корневой `android/build.gradle`):
 
 ```gradle
 subprojects {
-    afterEvaluate {
-        if (project.hasProperty('android')) {
-            project.android.compileOptions {
+    pluginManager.withPlugin('com.android.base') {
+        extensions.configure('android') {
+            compileOptions {
                 sourceCompatibility JavaVersion.VERSION_11
                 targetCompatibility JavaVersion.VERSION_11
             }
         }
-        tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-            kotlinOptions {
-                jvmTarget = '11'
-            }
+    }
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        kotlinOptions {
+            jvmTarget = '11'
         }
     }
 }
 ```
-```
+
+Если ранее уже был вставлен вариант с `afterEvaluate` — удалить его
+полностью и заменить этим блоком.
 
 `minSdk` по умолчанию (21) всем плагинам проекта достаточен; если какой-то
 плагин потребует выше — поднять `minSdk` в том же файле до 23.
@@ -287,10 +295,36 @@ Kotlin 1.8 — новый Gradle 9 считает такое рассоглас�
 1. В `android/app/build.gradle.kts` привести обе цели к 11 и включить
    desugaring — см. раздел 3.2.
 2. В корневой `android/build.gradle.kts` добавить блок `subprojects`
-   выравнивания для всех плагинов — см. раздел 3.3.
+   выравнивания для всех плагинов — см. раздел 3.3. Вариант только через
+   `pluginManager.withPlugin`: на новом шаблоне Flutter `afterEvaluate`
+   в конце файла падает с ошибкой
+   `Cannot run Project.afterEvaluate ... when the project is already
+   evaluated`.
 3. Собрать заново:
 
    ```powershell
    flutter clean
    flutter run
    ```
+
+## 8. Ошибка «Cannot run Project.afterEvaluate when the project is already evaluated»
+
+Возникает в корневом `android/build.gradle.kts`, если блок выравнивания
+JVM-целей написан через `subprojects { afterEvaluate { ... } }` и стоит
+после шаблонного `subprojects { project.evaluationDependsOn(":app") }`:
+к моменту выполнения колбэка модуль `:app` уже оценён, и регистрация
+нового `afterEvaluate` запрещена.
+
+Решение — заменить весь блок на вариант с
+`pluginManager.withPlugin("com.android.base")` из раздела 3.3: он не
+зависит от порядка оценки проектов.
+
+## 9. Нужно ли коммитить правки в android/?
+
+Нет. Папки `android/`, `ios/`, `web/` намеренно исключены из git
+(см. `.gitignore`, секция «Platform folders are regenerated locally via
+`flutter create .`»). Правки Gradle и манифеста — локальные, специфичные
+для машины разработчика, и в репозиторий не попадают: `git status` их
+не покажет. Все рабочие сниппеты зафиксированы в этом документе, поэтому
+после повторной генерации платформенной папки их можно применить заново
+за пару минут.
