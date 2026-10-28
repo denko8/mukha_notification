@@ -1,0 +1,13 @@
+# IntelliJ related
+*.iml
+
+build/
+
+# Ignore the flutter sdk dir used in Github Actions
+_flutter/
+
+example/assets/models/
+
+*/libs/
+
+vosk-api/

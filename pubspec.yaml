@@ -35,19 +35,19 @@ dependencies:
   # Голосовой ввод — полностью офлайн на встроенной Vosk-модели.
   # Модель русского (~45 МБ) скачивается один раз при первом
   # использовании и в APK не упакована — приложение остаётся лёгким.
-  vosk_flutter: ^0.3.48
-  archive: ^3.6.1                 # распаковка zip модели
-  # 10.x, а не 11.x: опубликованный vosk_flutter 0.3.48 требует ^10.2.0
-  permission_handler: ^10.2.0    # запрос доступа к микрофону
+  # Vendored пропатченная копия плагина (совместимость с AGP 8.6+ /
+  # Flutter 3.29+): third_party/vosk_flutter, детали —
+  # third_party/vosk_flutter/VENDOR_README.md
+  vosk_flutter:
+    path: third_party/vosk_flutter
+  archive: ^3.6.1                 # распаковка zip модели (требование плагина)
+  permission_handler: ^11.3.1    # запрос доступа к микрофону
   audioplayers: ^6.1.0            # плеер аудиовложений
   url_launcher: ^6.3.1            # открытие ссылок/календаря
   google_mlkit_text_recognition: ^0.15.0  # OCR (мобильные)
   in_app_purchase: ^3.2.0         # PRO-подписка
   app_links: ^6.3.2               # deep links семейных инвайтов
-  # 0.13.x, а не 1.x: опубликованный vosk_flutter 0.3.48 требует ^0.13.5
-  # (в master репозитория уже 1.x, но релиз отстаёт). Используемый API
-  # (Client/Request/StreamedResponse/bodyBytes) в 0.13 идентичен.
-  http: ^0.13.6                 # AI-распознавание (OpenAI-совместимые API) и загрузка Vosk-модели
+  http: ^1.2.2                 # AI-распознавание (OpenAI-совместимые API) и загрузка Vosk-модели
 
   # Sharing / export / invites
   share_plus: ^7.2.2
