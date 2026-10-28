@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 /// Причина недоступности голосового ввода — чтобы UI показывал
@@ -61,15 +62,22 @@ class SpeechToTextVoiceService implements VoiceInputService {
       // разбираем после.
       _lastError = null;
       final ok = await _speech.initialize(
-        onError: (error) =>
-            _lastError = '${error.errorMsg} (permanent=${error.permanent})',
+        onError: (error) {
+          _lastError = '${error.errorMsg} (permanent=${error.permanent})';
+          debugPrint('[STT] initialize onError: $_lastError');
+        },
+        // В debug-режиме плагин пишет свой канал в логкат — видно,
+        // доходит ли до него аудио и ответы системного движка.
+        debugLogging: kDebugMode,
       );
+      debugPrint('[STT] initialize -> $ok, lastError=$_lastError');
       if (ok) {
         _initialized = true;
         return VoiceCheckResult.okResult;
       }
       return _classifyFailure();
     } catch (e) {
+      debugPrint('[STT] initialize threw: $e');
       return VoiceCheckResult(
         VoiceAvailability.unavailable,
         technicalDetails: '$e',
@@ -121,12 +129,16 @@ class SpeechToTextVoiceService implements VoiceInputService {
       return;
     }
 
-    // Подбираем доступную локаль: запрошенную ru_RU, любой русский
-    // вариант, иначе null — системный язык по умолчанию.
+    // Подбираем локаль, которую движок реально умеет:
+    // запрошенная ru_RU -> любой русский вариант -> null (язык системы).
+    // null важен: если жёстко передать неподдерживаемую локаль, часть
+    // движков молча не возвращает результаты — микрофон «горит», но
+    // распознанного текста нет.
     String? effectiveLocale = localeId;
     try {
       final available = await _speech.locales();
       final ids = available.map((e) => e.localeId).toList();
+      debugPrint('[STT] доступные локали (${ids.length}): $ids');
       if (!ids.contains(localeId)) {
         final ru = ids.firstWhere(
           (id) => id.toLowerCase().startsWith('ru'),
@@ -134,9 +146,12 @@ class SpeechToTextVoiceService implements VoiceInputService {
         );
         effectiveLocale = ru.isNotEmpty ? ru : null;
       }
-    } catch (_) {
-      // Список локалей недоступен — оставляем запрошенную.
+    } catch (e) {
+      // Список локалей недоступен — не навязываем ничего, берём систему.
+      debugPrint('[STT] locales() threw: $e — использую системный язык');
+      effectiveLocale = null;
     }
+    debugPrint('[STT] выбрана локаль: $effectiveLocale');
 
     // В API speech_to_text 7.x у listen() нет параметра onError:
     // ошибки и статус приходят через публичные поля errorListener и
@@ -145,15 +160,25 @@ class SpeechToTextVoiceService implements VoiceInputService {
     // Тип аргумента берём из публичного typedef SpeechErrorListener,
     // сам класс SpeechRecognitionError пакетом не экспортируется.
     final SpeechErrorListener errorHandler = (error) {
+      debugPrint(
+          '[STT] errorListener: ${error.errorMsg} permanent=${error.permanent}');
       onStatus(false);
       onError?.call(error.errorMsg);
     };
     _speech.errorListener = errorHandler;
-    _speech.statusListener =
-        (status) => onStatus(status == SpeechToText.listeningStatus);
+    _speech.statusListener = (status) {
+      debugPrint('[STT] status: $status');
+      onStatus(status == SpeechToText.listeningStatus);
+    };
 
+    debugPrint('[STT] listen() старт, localeId=$effectiveLocale');
     await _speech.listen(
-      onResult: (result) => onText(result.recognizedWords),
+      onResult: (result) {
+        debugPrint(
+            '[STT] result: final=${result.finalResult} '
+            'words="${result.recognizedWords}"');
+        if (result.recognizedWords.isNotEmpty) onText(result.recognizedWords);
+      },
       // listenFor/pauseFor/localeId в 7.x остаются именованными
       // параметрами listen() (в SpeechListenOptions их нет).
       listenFor: const Duration(minutes: 1),
@@ -163,7 +188,10 @@ class SpeechToTextVoiceService implements VoiceInputService {
   }
 
   @override
-  Future<void> stopListening() => _speech.stop();
+  Future<void> stopListening() {
+    debugPrint('[STT] stop()');
+    return _speech.stop();
+  }
 }
 
 class NoopVoiceService implements VoiceInputService {

@@ -47,6 +47,11 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   String? _manualCategoryKey;
   late bool _isFamily = widget.forceFamily;
   bool _listening = false;
+  // Диагностика тихой сессии: было ли хоть одно распознанное слово
+  // и прилетала ли ошибка — чтобы не показывать два снэкбара подряд.
+  bool _voiceGotText = false;
+  bool _voiceErrored = false;
+  bool _voiceManualStop = false;
 
   @override
   void initState() {
@@ -114,10 +119,12 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   Future<void> _toggleVoice() async {
     final voice = ref.read(voiceInputServiceProvider);
     if (_listening) {
+      _voiceManualStop = true;
       await voice.stopListening();
       if (mounted) setState(() => _listening = false);
       return;
     }
+    _voiceManualStop = false;
     final messenger = ScaffoldMessenger.of(context);
     final check = await voice.ensureAvailable();
     if (!check.ok || !mounted) {
@@ -137,17 +144,40 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       messenger.showSnackBar(SnackBar(content: Text(message)));
       return;
     }
+    _voiceGotText = false;
+    _voiceErrored = false;
     setState(() => _listening = true);
     await voice.startListening(
       onText: (spoken) {
+        _voiceGotText = true;
         final base = _controller.text.isEmpty ? '' : '${_controller.text} ';
         _controller.text = '$base$spoken';
       },
       onStatus: (active) {
-        if (mounted) setState(() => _listening = active);
+        if (!mounted) return;
+        setState(() => _listening = active);
+        // Сессия закрылась движком, но ни слова не пришло и ошибки нет —
+        // раньше это выглядело как «микрофон горит и молчит».
+        if (!active &&
+            !_voiceGotText &&
+            !_voiceErrored &&
+            !_voiceManualStop) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Речь не распознана. Проверьте: есть ли интернет '
+                '(языковая модель докачивается), выбран ли Google в '
+                'Настройки → Система → Язык и ввод → голосовой ввод, '
+                'и говорите ли вы после нажатия микрофона.',
+              ),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
       },
       onError: (message) {
         if (!mounted) return;
+        _voiceErrored = true;
         setState(() => _listening = false);
         messenger.showSnackBar(
           SnackBar(
@@ -471,56 +501,61 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       onPressed: _showOptions,
                     ),
                     if (widget.showFamilyToggle) ...[
-                      const Spacer(),
-                      // Flexible + ellipsis: подпись ужимается на узких
-                      // экранах вместо RenderFlex overflow.
+                      // Flexible занимает всё место после кнопок, а
+                      // FittedBox(scaleDown) ужимает содержимое, если оно
+                      // не влезает: RenderFlex overflow на узких экранах
+                      // исключён в принципе.
                       Flexible(
-                        child: Tooltip(
-                          message:
-                              'Включите, чтобы заметку видели все члены семьи',
-                          child: GestureDetector(
-                            // Тап по иконке/подписи тоже переключает —
-                            // удобнее, чем попадать в маленький Switch.
-                            onTap: widget.forceFamily
-                                ? null
-                                : () => setState(
-                                    () => _isFamily = !_isFamily),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.groups_outlined,
-                                  size: 17,
-                                  color: _isFamily
-                                      ? AppColors.gold
-                                      : theme.colorScheme.onSurface
-                                          .withValues(alpha: 0.65),
-                                ),
-                                const SizedBox(width: 4),
-                                Flexible(
-                                  child: Text(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Tooltip(
+                            message:
+                                'Включите, чтобы заметку видели все члены семьи',
+                            child: GestureDetector(
+                              // Тап по иконке/подписи тоже переключает —
+                              // удобнее, чем попадать в маленький Switch.
+                              onTap: widget.forceFamily
+                                  ? null
+                                  : () => setState(
+                                      () => _isFamily = !_isFamily),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.groups_outlined,
+                                    size: 16,
+                                    color: _isFamily
+                                        ? AppColors.gold
+                                        : theme.colorScheme.onSurface
+                                            .withValues(alpha: 0.65),
+                                  ),
+                                  const SizedBox(width: 3),
+                                  // Внутри FittedBox ширина не ограничена,
+                                  // поэтому softWrap:false вместо Flexible.
+                                  Text(
                                     'Семейная',
-                                    style: theme.textTheme.bodySmall?.copyWith(
+                                    softWrap: false,
+                                    style:
+                                        theme.textTheme.bodySmall?.copyWith(
                                       fontWeight: _isFamily
                                           ? FontWeight.w600
                                           : FontWeight.normal,
-                                      color: _isFamily
-                                          ? AppColors.gold
-                                          : null,
+                                      color:
+                                          _isFamily ? AppColors.gold : null,
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ),
-                                Switch(
-                                  value: _isFamily,
-                                  materialTapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                  onChanged: widget.forceFamily
-                                      ? null
-                                      : (v) => setState(() => _isFamily = v),
-                                ),
-                              ],
+                                  Switch(
+                                    value: _isFamily,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    onChanged: widget.forceFamily
+                                        ? null
+                                        : (v) =>
+                                            setState(() => _isFamily = v),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
