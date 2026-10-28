@@ -3,7 +3,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/settings/models/app_settings.dart';
-import '../features/settings/state/settings_notifier.dart';
 import '../features/shell/main_scaffold.dart';
 import 'providers.dart';
 import '../core/theme/app_theme.dart';

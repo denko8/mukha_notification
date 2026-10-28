@@ -8,7 +8,7 @@ import '../models/note_attachment.dart';
 class AttachmentPicker {
   AttachmentPicker._();
 
-  static final _uuid = const Uuid();
+  static const _uuid = Uuid();
 
   static Future<NoteAttachment?> pickImage({required bool camera}) async {
     final picker = ImagePicker();

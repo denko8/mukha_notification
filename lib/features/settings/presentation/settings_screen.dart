@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../models/app_settings.dart';
-import '../state/settings_notifier.dart';
 import 'paywall_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {

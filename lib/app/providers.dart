@@ -9,6 +9,7 @@ import '../features/family/state/family_notifier.dart';
 import '../features/notes/data/notes_repository.dart';
 import '../features/notes/models/note.dart';
 import '../features/notes/state/notes_notifier.dart';
+import '../features/settings/models/app_settings.dart';
 import '../features/settings/state/settings_notifier.dart';
 
 /// Инфраструктурные провайдеры.
@@ -47,8 +48,8 @@ final settingsProvider =
     AsyncNotifierProvider<SettingsNotifier, AppSettings>(SettingsNotifier.new);
 
 final familyNotifierProvider =
-    AsyncNotifierProvider<FamilyNotifier, List<FamilyMemberState>>(
-        FamilyNotifier.new);
+    AsyncNotifierProvider<FamilyBoardNotifier, List<FamilyMemberState>>(
+        FamilyBoardNotifier.new);
 
 /// UI-фильтры.
 final homeDateFilterProvider = StateProvider<DateTime?>((ref) => null);

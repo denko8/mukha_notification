@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/utils/date_parser.dart';
-import '../../settings/state/settings_notifier.dart';
 import '../models/note.dart';
 import '../models/note_attachment.dart';
 
@@ -40,7 +39,9 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
     return note;
   }
 
-  Future<void> update(AppNote note) async {
+  // Имя updateNote вместо update: в riverpod 2.6+ у AsyncNotifierBase
+  // уже есть метод update с другой сигнатурой.
+  Future<void> updateNote(AppNote note) async {
     final updated = await ref.read(notesRepositoryProvider).update(note);
     final list = [...?state.valueOrNull];
     final i = list.indexWhere((n) => n.id == note.id);
@@ -56,10 +57,10 @@ class NotesNotifier extends AsyncNotifier<List<AppNote>> {
   }
 
   Future<void> toggleDone(AppNote note) =>
-      update(note.copyWith(done: !note.done));
+      updateNote(note.copyWith(done: !note.done));
 
   Future<void> setReminder(AppNote note, DateTime? when) =>
-      update(note.copyWith(clearReminder: when == null, reminderAt: when));
+      updateNote(note.copyWith(clearReminder: when == null, reminderAt: when));
 
   /// Перепланирует напоминания после перезапуска приложения.
   Future<void> rescheduleAll() async {

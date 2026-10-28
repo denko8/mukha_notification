@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_parser.dart';
 import '../models/note.dart';
@@ -54,7 +55,7 @@ class _NoteEditScreenState extends ConsumerState<NoteEditScreen> {
                 reminderAt: parsed ?? note.reminderAt,
                 clearReminder: parsed == null && note.reminderAt == null,
               );
-              await ref.read(notesNotifierProvider.notifier).update(updated);
+              await ref.read(notesNotifierProvider.notifier).updateNote(updated);
               if (context.mounted) Navigator.of(context).pop();
             },
             child: const Text('Сохранить',

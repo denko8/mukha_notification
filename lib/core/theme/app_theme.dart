@@ -122,7 +122,7 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: scheme.surface,
         indicatorColor: AppColors.goldSoft,
-        labelTextStyle: WidgetStatePropertyAll(
+        labelTextStyle: const WidgetStatePropertyAll(
           TextStyle(fontSize: 12, fontFamily: fontFamily),
         ),
       ),

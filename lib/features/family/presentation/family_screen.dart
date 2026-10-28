@@ -7,7 +7,6 @@ import '../../notes/presentation/note_detail_screen.dart';
 import '../../notes/presentation/widgets/note_feed.dart';
 import '../../notes/presentation/widgets/note_input_bar.dart';
 import '../models/family_member.dart';
-import '../state/family_notifier.dart';
 import 'widgets/invite_dialog.dart';
 
 class FamilyScreen extends ConsumerWidget {

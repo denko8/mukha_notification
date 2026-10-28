@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../../../app/providers.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../models/family_member.dart';
 import '../../state/family_notifier.dart';

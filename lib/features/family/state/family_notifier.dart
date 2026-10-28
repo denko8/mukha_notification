@@ -6,7 +6,9 @@ import '../models/family_member.dart';
 /// Тонкая обёртка-модель для UI: храним [FamilyMember] без доп. полей.
 typedef FamilyMemberState = FamilyMember;
 
-class FamilyNotifier extends AsyncNotifier<List<FamilyMember>> {
+/// Имя выбрано отличным от `FamilyNotifier` из самого пакета riverpod 2.6+,
+/// иначе возникает ambiguous_import.
+class FamilyBoardNotifier extends AsyncNotifier<List<FamilyMember>> {
   @override
   Future<List<FamilyMember>> build() {
     return ref.read(familyRepositoryProvider).loadMembers();

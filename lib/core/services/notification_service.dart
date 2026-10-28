@@ -31,7 +31,8 @@ class LocalNotificationService implements NotificationService {
     if (_ready) return;
     tz_data.initializeTimeZones();
     try {
-      final name = await FlutterTimezone().getLocalTimezone();
+      // В flutter_timezone 3.x метод статический.
+      final name = await FlutterTimezone.getLocalTimezone();
       tz.setLocalLocation(tz.getLocation(name));
     } catch (_) {
       // Если системную зону определить не удалось — остаёмся на UTC.

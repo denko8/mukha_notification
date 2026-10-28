@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../app/providers.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/date_formatter.dart';
 import '../../../core/utils/date_parser.dart';
@@ -247,7 +248,6 @@ class _AttachmentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     switch (attachment.type) {
       case AttachmentType.image:
         return Padding(
@@ -274,7 +274,7 @@ class _AttachmentTile extends StatelessWidget {
             subtitle: const Text('PDF-документ'),
             trailing: TextButton(
               child: const Text('Открыть'),
-              onPressed: () => Printing.openFile(attachment.path),
+              onPressed: () => Printing.openPdfFile(attachment.path),
             ),
           ),
         );
