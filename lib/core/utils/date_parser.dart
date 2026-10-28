@@ -56,13 +56,16 @@ class NaturalDateParser {
   // явные границы через lookbehind/lookahead с кириллическими классами.
   static const String _notAfterWord = r'(?![а-яёА-ЯЁa-zA-Z0-9])';
   static const String _notBeforeWord = r'(?<![а-яёА-ЯЁa-zA-Z0-9])';
+  // Окончания русских слов (часа/часов/минуты): \w* в Dart не подходит,
+  // т.к. \w — ASCII-only и не матчит кириллицу.
+  static const String _cyrEnding = r'[а-яё]*';
 
   static final RegExp _compoundDuration = RegExp(
-    r'через\s+(\d+)\s*час\w*\s+(\d+)\s*минут\w*',
+    'через\\s+(\\d+)\\s*час$_cyrEnding\\s+(\\d+)\\s*минут$_cyrEnding',
     caseSensitive: false,
   );
   static final RegExp _duration = RegExp(
-    'через\\s+(\\d+)\\s*(час\\w*|ч|минут\\w*|мин|ден\\w*|дня|дней|д)$_notAfterWord',
+    'через\\s+(\\d+)\\s*(час$_cyrEnding|ч|минут$_cyrEnding|мин|ден$_cyrEnding|дня|дней|д)$_notAfterWord',
     caseSensitive: false,
   );
   static final RegExp _keyword = RegExp(

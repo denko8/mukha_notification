@@ -80,6 +80,17 @@ void main() {
       expect(parser().parseReminder('через 2 дня'), DateTime(2024, 12, 7, 10, 0));
     });
 
+    test('русские окончания не ломают длительности (регрессия на ASCII \\w)', () {
+      expect(parser().parseReminder('через 1 час'), DateTime(2024, 12, 5, 11, 0));
+      expect(parser().parseReminder('через 3 часа'), DateTime(2024, 12, 5, 13, 0));
+      expect(parser().parseReminder('через 30 мин'), DateTime(2024, 12, 5, 10, 30));
+      expect(parser().parseReminder('через 7 дней'), DateTime(2024, 12, 12, 10, 0));
+      expect(
+        parser().parseReminder('через 2 часа 15 минут'),
+        DateTime(2024, 12, 5, 12, 15),
+      );
+    });
+
     test('число и месяц текстом со временем', () {
       expect(
         parser().parseReminder('25 декабря в 10:00 встреча'),
