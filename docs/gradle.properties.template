@@ -1,0 +1,14 @@
+# Шаблон для android/gradle.properties (создаётся после `flutter create`).
+# Скопируй содержимое в КОНЕЦ файла android/gradle.properties:
+#   Copy-Item docs\gradle.properties.template -Destination android\gradle.properties
+#   (или вручную добавь строки ниже в существующий android/gradle.properties)
+#
+# Gradle НЕ читает HTTPS_PROXY — прокси задаётся только так.
+# После сборки в обычной сети эти строки можно удалить или закомментировать.
+
+systemProp.http.proxyHost=127.0.0.1
+systemProp.http.proxyPort=8080
+systemProp.https.proxyHost=127.0.0.1
+systemProp.https.proxyPort=8080
+systemProp.http.nonProxyHosts=localhost|127.0.0.1
+systemProp.https.nonProxyHosts=localhost|127.0.0.1

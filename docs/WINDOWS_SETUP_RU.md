@@ -127,6 +127,40 @@ flutter doctor
 Диагностика: `flutter pub get -v`. Коннект напрямую на `pub.dev:443` —
 переменные не подхватились; ошибка к `127.0.0.1:8080` — проблема моста.
 
+## Чек-лист после успешного `flutter doctor`
+
+1. Сгенерировать платформенные папки (существующие файлы не перезаписываются,
+   поэтому дефолтный widget_test.dart в проект не попадёт):
+
+   ```powershell
+   flutter create . --org app.smartnotes --project-name smart_notes --platforms=android,ios
+   flutter pub get
+   flutter analyze
+   flutter test
+   ```
+
+2. Прокси для Gradle (он не читает HTTPS_PROXY) — скопировать шаблон:
+
+   ```powershell
+   Get-Content docs\gradle.properties.template | Add-Content android\gradle.properties
+   ```
+
+   На время скачивания самого Gradle wrapper дополнительно в той же сессии:
+
+   ```powershell
+   $env:GRADLE_OPTS="-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=8080 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=8080"
+   ```
+
+3. Постоянные переменные, чтобы не задавать их в каждом окне:
+
+   ```powershell
+   setx HTTPS_PROXY "http://127.0.0.1:8080"
+   setx HTTP_PROXY  "http://127.0.0.1:8080"
+   setx NO_PROXY    "localhost,127.0.0.1,::1"
+   ```
+
+4. Запуск на эмуляторе или телефоне: `flutter run`.
+
 ## Следующий возможный барьер — Gradle
 
 При `flutter run` Android-сборка тянет артефакты с `dl.google.com`
