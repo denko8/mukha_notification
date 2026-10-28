@@ -1,6 +1,6 @@
 import 'package:share_plus/share_plus.dart';
 
-import '../features/notes/models/note.dart';
+import '../../features/notes/models/note.dart';
 import '../utils/date_formatter.dart';
 
 /// Отправка заметки через системный лист «Поделиться».
