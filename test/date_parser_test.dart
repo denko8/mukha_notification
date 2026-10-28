@@ -135,6 +135,54 @@ void main() {
     });
   });
 
+  group('NaturalDateParser — время суток и приёмы пищи', () {
+    test('"к обеду" -> 13:00', () {
+      expect(
+        parser().parseReminder('Завтра к обеду'),
+        DateTime(2024, 12, 6, 13, 0),
+      );
+    });
+
+    test('"после обеда" -> 14:00', () {
+      expect(
+        parser().parseReminder('Отчёт после обеда'),
+        DateTime(2024, 12, 5, 14, 0),
+      );
+    });
+
+    test('утро/день/вечер/ночь', () {
+      expect(parser().parseReminder('Встреча утром'), DateTime(2024, 12, 5, 9, 0));
+      expect(parser().parseReminder('Созвон днём'), DateTime(2024, 12, 5, 13, 0));
+      expect(parser().parseReminder('Позвонить вечером'), DateTime(2024, 12, 5, 19, 0));
+      expect(parser().parseReminder('Выйти ночью'), DateTime(2024, 12, 5, 23, 0));
+    });
+
+    test('завтрак и ужин', () {
+      expect(parser().parseReminder('Завтрак с мамой'), DateTime(2024, 12, 5, 8, 0));
+      expect(
+        parser().parseReminder('Купить продукты к ужину'),
+        DateTime(2024, 12, 5, 20, 0),
+      );
+    });
+
+    test('"с утра" и "под вечер"', () {
+      expect(parser().parseReminder('Собраться с утра'), DateTime(2024, 12, 5, 9, 0));
+      expect(parser().parseReminder('Созвон под вечер'), DateTime(2024, 12, 5, 19, 0));
+    });
+
+    test('явное время важнее времени суток', () {
+      expect(
+        parser().parseReminder('Завтра в 15:00 к обеду'),
+        DateTime(2024, 12, 6, 15, 0),
+      );
+    });
+
+    test('фраза "к обеду" попадает в подсветку', () {
+      final result = parser().parse('Завтра к обеду');
+      expect(result.spans.map((s) => s.text), contains('к обеду'));
+    });
+  });
+
   group('NaturalDateParser — подсветка', () {
     test('возвращает span-ы найденных фрагментов', () {
       final result = parser().parse('завтра в 14:00');

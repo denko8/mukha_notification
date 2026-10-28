@@ -8,6 +8,10 @@
 ///  * "10.12.2025", "в полдень", "в полночь", "в 7 вечера", "в 9 утра"
 ///
 /// Если время не указано — подставляется 09:00 (требование ТЗ).
+///
+/// Понимает также время суток и приёмы пищи: «к обеду» → 13:00,
+/// «после обеда» → 14:00, «утром» → 09:00, «вечером» → 19:00,
+/// «к ужину» → 20:00, «ночью» → 23:00. Явное время имеет приоритет.
 library;
 
 /// Подсвеченный фрагмент исходного текста (найденная дата/время).
@@ -90,6 +94,30 @@ class NaturalDateParser {
     r'в\s+(\d{1,2})(?:[.:](\d{2}))?\s*(утра|дня|вечера|ночи)?',
     caseSensitive: false,
   );
+
+  // Время суток и приёмы пищи без явных часов.
+  // Порядок важен: более длинные фразы ("после обеда") идут первыми.
+  static const List<_DayPartRule> _dayPartRules = [
+    _DayPartRule(r'после\s+обеда', 14, 0),
+    _DayPartRule(r'к\s+завтраку', 8, 0),
+    _DayPartRule(r'к\s+обеду', 13, 0),
+    _DayPartRule(r'к\s+ужину', 20, 0),
+    _DayPartRule(r'с\s+утра', 9, 0),
+    _DayPartRule(r'под\s+вечер', 19, 0),
+    _DayPartRule(r'завтрак[а-яё]*', 8, 0),
+    _DayPartRule(r'обед[а-яё]*', 13, 0),
+    _DayPartRule(r'ужин[а-яё]*', 20, 0),
+    _DayPartRule(r'утром', 9, 0),
+    _DayPartRule(r'дн[её]м', 13, 0),
+    _DayPartRule(r'вечером', 19, 0),
+    _DayPartRule(r'ночью', 23, 0),
+  ];
+
+  static final List<RegExp> _dayPartRegExps = [
+    for (final rule in _dayPartRules)
+      RegExp('$_notBeforeWord${rule.pattern}$_notAfterWord',
+          caseSensitive: false),
+  ];
 
   DateParseResult parse(String input) {
     final lower = input.toLowerCase();
@@ -221,6 +249,19 @@ class NaturalDateParser {
         claim(st);
       }
     }
+    // Время суток / приёмы пищи ("к обеду", "утром") — только если
+    // явное время не найдено.
+    if (time == null) {
+      for (var i = 0; i < _dayPartRules.length; i++) {
+        final m = _dayPartRegExps[i].firstMatch(lower);
+        if (m != null && !overlaps(m.start, m.end)) {
+          final rule = _dayPartRules[i];
+          time = _Time(rule.hour, rule.minute);
+          claim(m);
+          break;
+        }
+      }
+    }
 
     DateTime? reminder;
     if (relative != null) {
@@ -274,4 +315,13 @@ class _Time {
   final int hour;
   final int minute;
   const _Time(this.hour, this.minute);
+}
+
+/// Правило распознавания времени суток ("к обеду" → 13:00).
+class _DayPartRule {
+  final String pattern;
+  final int hour;
+  final int minute;
+
+  const _DayPartRule(this.pattern, this.hour, this.minute);
 }
