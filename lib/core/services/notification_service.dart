@@ -42,11 +42,16 @@ abstract class NotificationService {
   /// Тестовое уведомление через [delay] секунд — проверка канала
   /// и настроек прошивки без создания заметки.
   Future<void> scheduleTest({Duration delay = const Duration(seconds: 10)});
+
+  /// Немедленное уведомление (без AlarmManager). Если оно не видно —
+  /// значит система режет сам канал/приложение, а не планировщик.
+  Future<void> showImmediateTest();
 }
 
-/// Id тестового уведомления: заметки используют hashCode uuid,
-/// берём заведомо редкое положительное значение.
+/// Id тестовых уведомлений: заметки используют hashCode uuid,
+/// берём заведомо редкие положительные значения.
 const int _testNotificationId = 2147483000;
+const int _immediateTestId = 2147483001;
 
 class LocalNotificationService implements NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
@@ -196,6 +201,30 @@ class LocalNotificationService implements NotificationService {
       when: DateTime.now().add(delay),
     );
   }
+
+  @override
+  Future<void> showImmediateTest() async {
+    if (!_ready) await init();
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'smart_notes_reminders',
+        'Напоминания',
+        channelDescription: 'Напоминания о заметках Smart Notes',
+        importance: Importance.high,
+        priority: Priority.high,
+        category: AndroidNotificationCategory.reminder,
+        visibility: NotificationVisibility.public,
+      ),
+      iOS: DarwinNotificationDetails(),
+    );
+    await _plugin.show(
+      _immediateTestId,
+      'Проверка Smart Notes',
+      'Это уведомление показано немедленно — канал работает.',
+      details,
+    );
+    debugPrint('[NOTIFY] немедленное тестовое уведомление показано');
+  }
 }
 
 /// Заглушка для тестов и web: ничего не планирует.
@@ -232,4 +261,7 @@ class NoopNotificationService implements NotificationService {
   }) async {
     scheduled.add(_testNotificationId);
   }
+
+  @override
+  Future<void> showImmediateTest() async {}
 }

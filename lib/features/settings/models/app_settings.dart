@@ -21,6 +21,9 @@ class AppSettings {
   final int quietStartHour;
   final int quietEndHour;
   final ThemeMode themeMode;
+
+  /// id выбранной цветовой темы (см. ThemeVariant в core/theme).
+  final String themeVariant;
   final AppFontSize fontSize;
   final bool proEnabled;
 
@@ -47,6 +50,7 @@ class AppSettings {
     this.quietStartHour = 22,
     this.quietEndHour = 8,
     this.themeMode = ThemeMode.light,
+    this.themeVariant = 'japandi',
     this.fontSize = AppFontSize.normal,
     this.proEnabled = false,
     this.aiEnabled = false,
@@ -68,6 +72,7 @@ class AppSettings {
     int? quietStartHour,
     int? quietEndHour,
     ThemeMode? themeMode,
+    String? themeVariant,
     AppFontSize? fontSize,
     bool? proEnabled,
     bool? aiEnabled,
@@ -88,6 +93,7 @@ class AppSettings {
       quietStartHour: quietStartHour ?? this.quietStartHour,
       quietEndHour: quietEndHour ?? this.quietEndHour,
       themeMode: themeMode ?? this.themeMode,
+      themeVariant: themeVariant ?? this.themeVariant,
       fontSize: fontSize ?? this.fontSize,
       proEnabled: proEnabled ?? this.proEnabled,
       aiEnabled: aiEnabled ?? this.aiEnabled,
@@ -110,6 +116,7 @@ class AppSettings {
         'quietStartHour': quietStartHour,
         'quietEndHour': quietEndHour,
         'themeMode': themeMode.name,
+        'themeVariant': themeVariant,
         'fontSize': fontSize.name,
         'proEnabled': proEnabled,
         'aiEnabled': aiEnabled,
@@ -134,6 +141,7 @@ class AppSettings {
           (m) => m.name == map['themeMode'],
           orElse: () => ThemeMode.light,
         ),
+        themeVariant: map['themeVariant'] as String? ?? 'japandi',
         fontSize: AppFontSize.values.firstWhere(
           (m) => m.name == map['fontSize'],
           orElse: () => AppFontSize.normal,

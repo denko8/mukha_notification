@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -40,7 +42,8 @@ class NoteInputBar extends ConsumerStatefulWidget {
   ConsumerState<NoteInputBar> createState() => _NoteInputBarState();
 }
 
-class _NoteInputBarState extends ConsumerState<NoteInputBar> {
+class _NoteInputBarState extends ConsumerState<NoteInputBar>
+    with SingleTickerProviderStateMixin {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   final List<NoteAttachment> _attachments = [];
@@ -55,6 +58,14 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
   // Текст, набранный руками до начала сессии: распознанное подставляется
   // суффиксом и заменяется целиком (Vosk отдаёт нарастающий partial).
   String _voiceBase = '';
+  // Пауза в речи, после которой заметка автоматически сохраняется.
+  static const Duration _silenceAutoSave = Duration(seconds: 3);
+  Timer? _silenceTimer;
+  // Пульс красной точки-индикатора записи.
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
 
   @override
   void initState() {
@@ -64,10 +75,42 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
 
   @override
   void dispose() {
+    _silenceTimer?.cancel();
+    _pulse.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  /// Перезапускает отсчёт тишины: вызывается на каждом распознанном
+  /// фрагменте. Срабатывает только во время активной записи.
+  void _armSilenceTimer() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(_silenceAutoSave, _onSilenceTimeout);
+  }
+
+  void _cancelSilenceTimer() => _silenceTimer?.cancel();
+
+  /// Тишина дольше [_silenceAutoSave]: есть текст — сохраняем заметку
+  /// и гасим микрофон; текста нет — просто выключаем запись.
+  Future<void> _onSilenceTimeout() async {
+    if (!mounted || !_listening) return;
+    _cancelSilenceTimer();
+    await ref.read(voiceInputServiceProvider).stopListening();
+    if (!mounted) return;
+    setState(() => _listening = false);
+    final spoken = _controller.text.trim();
+    if (spoken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Ничего не расслышал — запись выключена'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    await _save();
   }
 
   void _onControllerChanged() => setState(_recomputeHints);
@@ -88,6 +131,14 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
       );
       return;
     }
+    // Сохранение всегда завершает голосовую сессию: гасим таймер
+    // тишины и микрофон, иначе запись продолжает висеть в фоне.
+    _cancelSilenceTimer();
+    if (_listening) {
+      await ref.read(voiceInputServiceProvider).stopListening();
+      if (mounted) setState(() => _listening = false);
+    }
+    _voiceBase = '';
     final settings =
         ref.read(settingsProvider).valueOrNull ?? const AppSettings();
     await ref.read(notesNotifierProvider.notifier).addFromText(
@@ -121,6 +172,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
 
   Future<void> _toggleVoice() async {
     if (_listening) {
+      _cancelSilenceTimer();
       await ref.read(voiceInputServiceProvider).stopListening();
       if (mounted) setState(() => _listening = false);
       return;
@@ -165,7 +217,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.mic_none, color: AppColors.gold),
+                        Icon(Icons.mic_none, color: AppColors.gold),
                         const SizedBox(width: 10),
                         Text('Голосовой ввод',
                             style: Theme.of(context).textTheme.titleMedium),
@@ -182,7 +234,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       Text(
                         'Не удалось скачать: ${state.error ?? 'ошибка сети'}. '
                         'Проверьте интернет и попробуйте снова.',
-                        style: const TextStyle(color: AppColors.danger),
+                        style: TextStyle(color: AppColors.danger),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -275,6 +327,8 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
         _controller.text = '$prefix$spoken';
         _controller.selection =
             TextSelection.collapsed(offset: _controller.text.length);
+        // Каждая новая порция речи отодвигает авто-сохранение.
+        _armSilenceTimer();
       },
       onStatus: (active) {
         if (!mounted) return;
@@ -282,9 +336,11 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
           _voiceBusy = false;
           _listening = active;
         });
+        if (!active) _cancelSilenceTimer();
       },
       onError: (message) {
         if (!mounted) return;
+        _cancelSilenceTimer();
         setState(() {
           _voiceBusy = false;
           _listening = false;
@@ -294,7 +350,12 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
         );
       },
     );
-    if (mounted) setState(() => _voiceBusy = false);
+    if (mounted) {
+      setState(() => _voiceBusy = false);
+      // Если пользователь молчит с самого старта — через 3 секунды
+      // запись аккуратно выключится без сохранения пустой заметки.
+      if (_listening) _armSilenceTimer();
+    }
   }
 
   static String _mb(int bytes) =>
@@ -370,7 +431,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
             ),
             for (final t in NoteTemplates.all)
               ListTile(
-                leading: const Icon(Icons.note_outlined, color: AppColors.gold),
+                leading: Icon(Icons.note_outlined, color: AppColors.gold),
                 title: Text(t.title),
                 subtitle: Text(t.text, maxLines: 1, overflow: TextOverflow.ellipsis),
                 onTap: () => Navigator.pop(ctx, t),
@@ -542,7 +603,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                     padding: const EdgeInsets.only(left: 4, top: 6),
                     child: Row(
                       children: [
-                        const Icon(Icons.alarm, size: 15, color: AppColors.gold),
+                        Icon(Icons.alarm, size: 15, color: AppColors.gold),
                         const SizedBox(width: 4),
                         Text(
                           'Напомню: ${DateFormatter.reminder(reminder)}',
@@ -571,6 +632,30 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                             onDeleted: () =>
                                 setState(() => _attachments.remove(a)),
                           ),
+                      ],
+                    ),
+                  ),
+                if (_listening)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                    child: Row(
+                      children: [
+                        FadeTransition(
+                          opacity: _pulse,
+                          child: const Icon(
+                            Icons.fiber_manual_record,
+                            size: 12,
+                            color: AppColors.danger,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Идёт запись. Пауза 3 секунды — заметка '
+                            'сохранится сама, микрофон выключится.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -684,7 +769,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar> {
                       constraints: const BoxConstraints(
                           minWidth: 40, minHeight: 40),
                       padding: const EdgeInsets.all(6),
-                      icon: const Icon(Icons.send, color: AppColors.gold),
+                      icon: Icon(Icons.send, color: AppColors.gold),
                       onPressed: _save,
                     ),
                   ],

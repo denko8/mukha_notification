@@ -10,7 +10,7 @@ class AppTheme {
   static const String fontFamily = 'Roboto';
 
   static ThemeData light() {
-    const scheme = ColorScheme(
+    final scheme = ColorScheme(
       brightness: Brightness.light,
       primary: AppColors.gold,
       onPrimary: Colors.white,
@@ -27,12 +27,12 @@ class AppTheme {
   }
 
   static ThemeData dark() {
-    const scheme = ColorScheme(
+    final scheme = ColorScheme(
       brightness: Brightness.dark,
       primary: AppColors.goldAlt,
-      onPrimary: Color(0xFF1F1B12),
+      onPrimary: const Color(0xFF1F1B12),
       secondary: AppColors.gold,
-      onSecondary: Color(0xFF1F1B12),
+      onSecondary: const Color(0xFF1F1B12),
       error: AppColors.danger,
       onError: Colors.white,
       surface: AppColors.darkCard,
@@ -110,7 +110,7 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppColors.radiusCard),
-          borderSide: const BorderSide(color: AppColors.gold, width: 1.5),
+          borderSide: BorderSide(color: AppColors.gold, width: 1.5),
         ),
         hintStyle: TextStyle(color: secondaryText, fontSize: 15),
       ),

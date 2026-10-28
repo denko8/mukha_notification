@@ -100,7 +100,7 @@ class NoteFeed extends ConsumerWidget {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Удалить', style: TextStyle(color: AppColors.danger)),
+            child: Text('Удалить', style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),

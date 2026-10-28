@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/services/notification_service.dart';
@@ -37,7 +38,7 @@ class SettingsScreen extends ConsumerWidget {
               ),
               title: Text(settings.profileName),
               subtitle: Text(settings.email.isEmpty ? 'Email не указан' : settings.email),
-              trailing: const Icon(Icons.edit, color: AppColors.gold),
+              trailing: Icon(Icons.edit, color: AppColors.gold),
               onTap: () => _editProfile(context, ref),
             ),
           ),
@@ -108,6 +109,11 @@ class SettingsScreen extends ConsumerWidget {
             child: Column(
               children: [
                 const SizedBox(height: 8),
+                _ThemeVariantPicker(
+                  selectedId: settings.themeVariant,
+                  onSelected: notifier.updateThemeVariant,
+                ),
+                const SizedBox(height: 12),
                 SegmentedButton<ThemeMode>(
                   segments: const [
                     ButtonSegment(value: ThemeMode.light, label: Text('Светлая')),
@@ -133,7 +139,7 @@ class SettingsScreen extends ConsumerWidget {
           _Section(
             title: 'Категории',
             child: ListTile(
-              leading: const Icon(Icons.label_outline, color: AppColors.gold),
+              leading: Icon(Icons.label_outline, color: AppColors.gold),
               title: const Text('Мои категории'),
               subtitle: Text(settings.customCategories.isEmpty
                   ? 'Создать свою категорию для заметок'
@@ -199,14 +205,26 @@ class SettingsScreen extends ConsumerWidget {
       return;
     }
 
+    // Просим исключить приложение из энергосбережения: на vivo это
+    // частая причина, по которой точные будильники не срабатывают.
+    try {
+      await Permission.ignoreBatteryOptimizations.request();
+    } catch (_) {
+      // Часть прошивок не показывает системный диалог — не критично,
+      // ниже даём ручной чек-лист и кнопку настроек.
+    }
+
     final diag = await service.diagnose();
+    // Два теста: немедленный проверяет сам канал уведомлений,
+    // отложенный (10 с) — работу AlarmManager в фоне.
+    await service.showImmediateTest();
     await service.scheduleTest();
 
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Тест запланирован'),
+        title: const Text('Проверка уведомлений'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,14 +243,30 @@ class SettingsScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Тестовое уведомление придёт через 10 секунд. '
-              'Если не пришло — проверьте автозапуск, фоновую работу '
-              'без ограничений по батарее и замок приложения в недавних.',
+              '1. Немедленное уведомление должно быть видно прямо сейчас.\n'
+              '2. Второе придёт через 10 секунд.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Если первого нет — система блокирует канал: Настройки → '
+              'Приложения → Smart Notes → Уведомления, включить все '
+              'категории. Если первый есть, а второй нет — это '
+              'энергосбережение vivo: Автозапуск включить, Батарея → '
+              '«Нет ограничений», закрепить приложение замком в '
+              'недавних.',
               style: TextStyle(fontSize: 13),
             ),
           ],
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              openAppSettings();
+            },
+            child: const Text('Открыть настройки'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Понятно'),
@@ -308,6 +342,92 @@ class SettingsScreen extends ConsumerWidget {
   void _comingSoon(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Документы будут опубликованы к релизу')),
+    );
+  }
+}
+
+/// Выбор цветовой темы: кружок-образец акцента на фоне светлой
+/// карточки варианта, подпись и галочка у выбранного.
+class _ThemeVariantPicker extends StatelessWidget {
+  final String selectedId;
+  final ValueChanged<String> onSelected;
+
+  const _ThemeVariantPicker({
+    required this.selectedId,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text('Цветовая тема', style: theme.textTheme.bodySmall),
+        ),
+        Wrap(
+          spacing: 14,
+          runSpacing: 12,
+          children: [
+            for (final v in ThemeVariant.all)
+              Tooltip(
+                message: v.description,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onSelected(v.id),
+                  child: SizedBox(
+                    width: 64,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: v.lightCard,
+                            border: Border.all(
+                              color: selectedId == v.id
+                                  ? v.accent
+                                  : theme.dividerColor,
+                              width: selectedId == v.id ? 2.5 : 1,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: v.accent,
+                            ),
+                            child: selectedId == v.id
+                                ? const Icon(Icons.check,
+                                    size: 14, color: Colors.white)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          v.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: selectedId == v.id
+                                ? FontWeight.w700
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -415,7 +535,7 @@ class _SyncSectionState extends ConsumerState<_SyncSection> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : const Icon(Icons.check_circle, color: AppColors.success),
+                : Icon(Icons.check_circle, color: AppColors.success),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

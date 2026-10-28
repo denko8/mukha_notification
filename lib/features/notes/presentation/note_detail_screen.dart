@@ -120,7 +120,7 @@ class NoteDetailScreen extends ConsumerWidget {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Удалить', style: TextStyle(color: AppColors.danger)),
+            child: Text('Удалить', style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -269,7 +269,7 @@ class _ReminderBlock extends ConsumerWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.alarm, color: AppColors.gold),
+                    Icon(Icons.alarm, color: AppColors.gold),
                     const SizedBox(width: 8),
                     Text(DateFormatter.reminder(note.reminderAt!),
                         style: theme.textTheme.titleLarge),
@@ -300,7 +300,7 @@ class _ReminderBlock extends ConsumerWidget {
                       style: theme.textTheme.bodyLarge),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.add_alarm, color: AppColors.gold),
+                  icon: Icon(Icons.add_alarm, color: AppColors.gold),
                   onPressed: onEdit,
                 ),
               ],
@@ -374,7 +374,7 @@ class _AttachmentTile extends ConsumerWidget {
       case AttachmentType.pdf:
         return Card(
           child: ListTile(
-            leading: const Icon(Icons.picture_as_pdf_outlined, color: AppColors.danger),
+            leading: Icon(Icons.picture_as_pdf_outlined, color: AppColors.danger),
             title: Text(attachment.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: const Text('PDF-документ'),
             trailing: TextButton(

@@ -25,6 +25,9 @@ class SettingsNotifier extends AsyncNotifier<AppSettings> {
   Future<void> updateThemeMode(ThemeMode mode) =>
       _save(state.value!.copyWith(themeMode: mode));
 
+  Future<void> updateThemeVariant(String variantId) =>
+      _save(state.value!.copyWith(themeVariant: variantId));
+
   Future<void> updateFontSize(AppFontSize size) =>
       _save(state.value!.copyWith(fontSize: size));
 

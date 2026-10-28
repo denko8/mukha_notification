@@ -56,7 +56,7 @@ class PaywallScreen extends ConsumerWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.check_circle, color: AppColors.gold, size: 20),
+                  Icon(Icons.check_circle, color: AppColors.gold, size: 20),
                   const SizedBox(width: 10),
                   Expanded(child: Text(benefit, style: theme.textTheme.bodyLarge)),
                 ],

@@ -38,14 +38,14 @@ Future<CategoryPickerResult?> showCategoryPickerSheet(
               leading: Icon(catalog.iconOf(key), color: AppColors.gold),
               title: Text(catalog.labelOf(key)),
               trailing: key == selectedKey
-                  ? const Icon(Icons.check, color: AppColors.gold)
+                  ? Icon(Icons.check, color: AppColors.gold)
                   : null,
               onTap: () =>
                   Navigator.pop(ctx, CategoryPickerResult.pick(key)),
             ),
           const Divider(),
           ListTile(
-            leading: const Icon(Icons.add_circle_outline, color: AppColors.gold),
+            leading: Icon(Icons.add_circle_outline, color: AppColors.gold),
             title: const Text('Создать категорию'),
             onTap: () =>
                 Navigator.pop(ctx, const CategoryPickerResult.create()),

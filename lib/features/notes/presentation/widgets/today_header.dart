@@ -154,7 +154,7 @@ class _UrgentLine extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          const Icon(Icons.check_box_outline_blank, size: 14, color: AppColors.gold),
+          Icon(Icons.check_box_outline_blank, size: 14, color: AppColors.gold),
           const SizedBox(width: 6),
           Expanded(
             child: Text(

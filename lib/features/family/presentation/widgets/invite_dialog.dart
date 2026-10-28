@@ -66,7 +66,7 @@ class _InviteDialogState extends ConsumerState<InviteDialog> {
                     SelectableText(
                       _invite!.link,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(color: AppColors.gold),
+                      style: TextStyle(color: AppColors.gold),
                     ),
                     const SizedBox(height: 8),
                     Text(
