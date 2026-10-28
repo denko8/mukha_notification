@@ -54,7 +54,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return SafeArea(
       child: Column(
         children: [
-          const TodayHeader(),
+          // Flexible: при открытой клавиатуре высота экрана падает почти вдвое,
+          // и блок «Сегодня» сжимается под доступное место вместо overflow колонки.
+          const Flexible(child: TodayHeader()),
           const NoteInputBar(),
           CategoryFilter(
             selected: categoryFilter,

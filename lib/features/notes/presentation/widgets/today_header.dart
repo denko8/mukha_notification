@@ -86,10 +86,9 @@ class _TodayHeaderState extends ConsumerState<TodayHeader> {
           ],
         ),
         child: SingleChildScrollView(
-          // В развёрнутом виде календарю разрешён скролл, чтобы не было overflow.
-          physics: _expanded
-              ? const ClampingScrollPhysics()
-              : const NeverScrollableScrollPhysics(),
+          // В развёрнутом виде календарю разрешён скролл, чтобы не было overflow;
+          // в сжатом (клавиатура) состоянии дела тоже можно проскроллить внутри карточки.
+          physics: const ClampingScrollPhysics(),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
