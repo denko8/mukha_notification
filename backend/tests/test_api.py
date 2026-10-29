@@ -229,3 +229,137 @@ def test_concurrent_invite_acceptance_is_single_use(client):
     assert results.count(200) == 1
     assert all(code in (200, 404, 409) for code in results)
     assert len(client.get(f'/families/{fid}/members', headers=alice).json()) == 2
+
+
+def test_idempotency_survives_lost_response_and_rejects_changed_body(client):
+    alice = account(client, 'a@example.com')
+    nid = str(uuid.uuid4())
+    headers = {**alice, 'Idempotency-Key': str(uuid.uuid4())}
+    body = {'expected_version': 0, 'text': 'Не создать дважды'}
+    first = client.put('/notes/' + nid, headers=headers, json=body)
+    replay = client.put('/notes/' + nid, headers=headers, json=body)
+    assert first.status_code == replay.status_code == 200
+    assert first.json() == replay.json()
+    assert len(client.get('/notes', headers=alice).json()) == 1
+    assert client.put('/notes/' + nid, headers=headers,
+                      json={**body, 'text': 'Другой запрос'}).status_code == 409
+    # A later write must not change the result recorded for the earlier operation.
+    assert put(client, alice, nid, 1, text='Новая версия').status_code == 200
+    assert client.put('/notes/' + nid, headers=headers, json=body).json() == first.json()
+    assert client.get('/notes/' + nid, headers=alice).json()['version'] == 2
+    delete_headers = {**alice, 'Idempotency-Key': str(uuid.uuid4())}
+    deleted = client.request('DELETE', '/notes/' + nid, headers=delete_headers,
+                             json={'expected_version': 2})
+    assert deleted.status_code == 200
+    assert deleted.json()['deleted'] is True
+    assert client.request('DELETE', '/notes/' + nid, headers=delete_headers,
+                          json={'expected_version': 2}).json() == deleted.json()
+
+
+def test_snapshot_pages_are_frozen_not_live_offset(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    ids = [str(uuid.UUID(int=i)) for i in [2, 3]]
+    for nid in ids:
+        put(client, alice, nid)
+    snapshot = client.post('/sync/snapshots', headers=alice)
+    assert snapshot.status_code == 201
+    sid = snapshot.json()['snapshot_id']
+    first = client.get(f'/sync/snapshots/{sid}?limit=1', headers=alice).json()
+    assert first['notes'][0]['id'] == ids[0]
+    # Live insertion before the page boundary + deletion of next item.
+    put(client, alice, str(uuid.UUID(int=1)))
+    client.request('DELETE', '/notes/' + ids[1], headers=alice,
+                   json={'expected_version': 1})
+    second = client.get(f'/sync/snapshots/{sid}?offset=1&limit=1', headers=alice).json()
+    assert second['notes'][0]['id'] == ids[1]
+    assert second['notes'][0]['deleted'] is False
+    assert second['next_offset'] is None
+    assert client.get(f'/sync/snapshots/{sid}', headers=bob).status_code == 404
+    assert client.delete(f'/sync/snapshots/{sid}', headers=bob).status_code == 404
+    assert client.delete(f'/sync/snapshots/{sid}', headers=alice).status_code == 204
+    assert client.get(f'/sync/snapshots/{sid}', headers=alice).status_code == 404
+    fresh = client.post('/sync/snapshots', headers=alice).json()['snapshot_id']
+    rows = client.get(f'/sync/snapshots/{fresh}', headers=alice).json()['notes']
+    assert len(rows) == 3
+    assert next(n for n in rows if n['id'] == ids[1])['deleted'] is True
+
+
+def test_snapshot_and_receipt_do_not_bypass_revoked_access(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    bid = client.get('/me', headers=bob).json()['id']
+    fid = client.post('/families', headers=alice, json={'name': 'Дом'}).json()['id']
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    client.post('/families/join', headers=bob, json={'token': token})
+    nid = str(uuid.uuid4())
+    headers = {**bob, 'Idempotency-Key': str(uuid.uuid4())}
+    body = dict(expected_version=0, text='Семейная', family_id=fid)
+    assert client.put('/notes/' + nid, headers=headers, json=body).status_code == 200
+    sid = client.post('/sync/snapshots', headers=bob).json()['snapshot_id']
+    assert client.delete(f'/families/{fid}/members/{bid}', headers=alice).status_code == 204
+    assert client.get(f'/sync/snapshots/{sid}', headers=bob).status_code == 409
+    assert client.put('/notes/' + nid, headers=headers, json=body).status_code == 404
+    assert client.get('/notes/' + nid, headers=bob).status_code == 404
+    assert client.delete(f'/sync/snapshots/{sid}', headers=bob).status_code == 204
+
+
+def test_snapshot_quota_expiry_and_release(client):
+    from sqlalchemy import update
+    from sqlalchemy.orm import Session
+    from datetime import timedelta
+    from app.main import SyncSnapshot, now
+
+    alice = account(client, 'a@example.com')
+    ids = [client.post('/sync/snapshots', headers=alice).json()['snapshot_id'] for _ in range(3)]
+    assert client.post('/sync/snapshots', headers=alice).status_code == 429
+    assert client.delete('/sync/snapshots/' + ids[0], headers=alice).status_code == 204
+    assert client.post('/sync/snapshots', headers=alice).status_code == 201
+    with Session(client.app.state.engine) as db:
+        db.execute(update(SyncSnapshot).values(expires=now() - timedelta(seconds=1)))
+        db.commit()
+    assert client.get('/sync/snapshots/' + ids[1], headers=alice).status_code == 410
+    assert client.post('/sync/snapshots', headers=alice).status_code == 201
+
+
+def test_concurrent_idempotent_retries_postgres(client):
+    import os
+    if not os.environ.get('TEST_POSTGRES_URL'):
+        pytest.skip('Requires PostgreSQL row locks; SQLite is not the deployment database')
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    alice = account(client, 'a@example.com')
+    headers = {**alice, 'Idempotency-Key': str(uuid.uuid4())}
+    nid = str(uuid.uuid4())
+    barrier = Barrier(2)
+
+    def send(_):
+        barrier.wait(timeout=10)
+        response = client.put('/notes/' + nid, headers=headers,
+                              json={'expected_version': 0, 'text': 'Один раз'})
+        return response.status_code, response.json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(send, range(2)))
+    assert results[0][0] == results[1][0] == 200
+    assert results[0][1] == results[1][1]
+
+
+def test_receipts_and_snapshots_survive_api_restart(client):
+    alice = account(client, 'a@example.com')
+    headers = {**alice, 'Idempotency-Key': str(uuid.uuid4())}
+    nid = str(uuid.uuid4())
+    body = {'expected_version': 0, 'text': 'Пережить перезапуск'}
+    result = client.put('/notes/' + nid, headers=headers, json=body).json()
+    sid = client.post('/sync/snapshots', headers=alice).json()['snapshot_id']
+    url = client.app.state.engine.url.render_as_string(hide_password=False)
+    restarted = create_app(url)
+    try:
+        with TestClient(restarted) as second:
+            response = second.put('/notes/' + nid, headers=headers, json=body)
+            assert response.status_code == 200
+            assert response.json() == result
+            assert second.get('/sync/snapshots/' + sid, headers=alice).json()['notes'] == [result]
+    finally:
+        restarted.state.engine.dispose()

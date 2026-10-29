@@ -1,16 +1,17 @@
 """Self-hosted API foundation. Clients retain their local offline store."""
 import hashlib
+import json
 import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, create_engine, select, update
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from .limits import RequestLimits
 
@@ -74,6 +75,24 @@ class Note(Base):
     payload: Mapped[dict] = mapped_column(JSON)
 
 
+class MutationReceipt(Base):
+    __tablename__ = 'mutation_receipts'
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), primary_key=True)
+    operation_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    note_id: Mapped[str] = mapped_column(String(36))
+    result: Mapped[dict] = mapped_column(JSON)
+
+
+class SyncSnapshot(Base):
+    __tablename__ = 'sync_snapshots'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    expires: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    family_ids: Mapped[list] = mapped_column(JSON)
+    notes: Mapped[list] = mapped_column(JSON)
+
+
 class Input(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
@@ -120,7 +139,7 @@ def create_app(database_url: str | None = None):
         raise RuntimeError('DATABASE_URL must be configured')
     engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    app = FastAPI(title='Smart Notes API', version='0.2.0')
+    app = FastAPI(title='Smart Notes API', version='0.3.0')
     app.add_middleware(RequestLimits)
     app.state.engine = engine
     password_hash = PasswordHash.recommended()
@@ -300,9 +319,103 @@ def create_app(database_url: str | None = None):
         return [public_note(n) for n in db.scalars(select(Note).where(accessible)
                 .order_by(Note.id).offset(offset).limit(limit))]
 
+    def begin_mutation(db, user, key, method, note_id, data):
+        # Serialize this user's writes/receipts. PG locks are held until commit.
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        fingerprint = digest(json.dumps([method, str(note_id), data.model_dump(mode='json')],
+                                        sort_keys=True, separators=(',', ':')))
+        if key is None:
+            return fingerprint, None
+        receipt = db.get(MutationReceipt, (user.id, str(key)))
+        if receipt is not None:
+            if receipt.request_hash != fingerprint:
+                raise HTTPException(409, 'Idempotency key reused for a different request')
+            # A receipt must never bypass revoked family access.
+            note_access(db, db.get(Note, receipt.note_id), user)
+            return fingerprint, receipt.result
+        if db.scalar(select(func.count()).select_from(MutationReceipt).where(
+                MutationReceipt.user_id == user.id)) >= 10000:
+            raise HTTPException(429, 'Mutation receipt quota reached; contact administrator')
+        return fingerprint, None
+
+    def finish_mutation(db, user, key, fingerprint, note):
+        result = public_note(note)
+        if key is not None:
+            db.add(MutationReceipt(user_id=user.id, operation_id=str(key),
+                request_hash=fingerprint, note_id=note.id, result=result))
+        # Receipt and note change are committed atomically, before replying.
+        db.commit()
+        return result
+
+    @app.get('/notes/{note_id}')
+    def get_note(note_id: uuid.UUID, db: DB, user: Current):
+        note = db.get(Note, str(note_id))
+        note_access(db, note, user)
+        return public_note(note)
+
+    @app.post('/sync/snapshots', status_code=201)
+    def snapshot(db: DB, user: Current):
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        db.execute(delete(SyncSnapshot).where(SyncSnapshot.expires <= now()))
+        count = db.scalar(select(func.count()).select_from(SyncSnapshot).where(
+            SyncSnapshot.user_id == user.id))
+        if count >= 3:
+            raise HTTPException(429, 'Too many active snapshots; release one or wait 10 minutes')
+        scopes = sorted(db.scalars(select(Member.family_id).where(Member.user_id == user.id)))
+        accessible = ((Note.owner_id == user.id) & Note.family_id.is_(None)) | Note.family_id.in_(scopes)
+        # One SELECT freezes a consistent set of rows; no offset over live data.
+        rows = list(db.scalars(select(Note).where(accessible).order_by(Note.id).limit(1001)))
+        if len(rows) > 1000:
+            raise HTTPException(413, 'Snapshot note limit reached; incremental sync is required')
+        frozen = [public_note(n) for n in rows]
+        if len(json.dumps(frozen).encode()) > 8 * 1024 * 1024:
+            raise HTTPException(413, 'Snapshot byte limit reached')
+        snap = SyncSnapshot(id=str(uuid.uuid4()), user_id=user.id,
+            expires=now() + timedelta(minutes=10), family_ids=scopes, notes=frozen)
+        db.add(snap)
+        db.commit()
+        return dict(snapshot_id=snap.id, expires_at=snap.expires.isoformat(),
+                    total=len(frozen), family_ids=scopes)
+
+    def own_snapshot(db, user, snapshot_id):
+        snap = db.get(SyncSnapshot, str(snapshot_id))
+        if snap is None or snap.user_id != user.id:
+            raise HTTPException(404, 'Snapshot not found')
+        if aware(snap.expires) <= now():
+            raise HTTPException(410, 'Snapshot expired; restart download')
+        scopes = sorted(db.scalars(select(Member.family_id).where(Member.user_id == user.id)))
+        if scopes != snap.family_ids:
+            raise HTTPException(409, 'Family access changed; discard snapshot and restart')
+        return snap
+
+    @app.get('/sync/snapshots/{snapshot_id}')
+    def snapshot_page(snapshot_id: uuid.UUID, db: DB, user: Current,
+                      offset: int = 0, limit: int = 100):
+        snap = own_snapshot(db, user, snapshot_id)
+        if offset < 0 or offset > len(snap.notes) or not 1 <= limit <= 200:
+            raise HTTPException(422, 'Invalid snapshot pagination')
+        end = min(offset + limit, len(snap.notes))
+        return dict(snapshot_id=snap.id, notes=snap.notes[offset:end],
+                    next_offset=end if end < len(snap.notes) else None,
+                    total=len(snap.notes), family_ids=snap.family_ids)
+
+    @app.delete('/sync/snapshots/{snapshot_id}', status_code=204)
+    def release_snapshot(snapshot_id: uuid.UUID, db: DB, user: Current):
+        # Release must work even if the snapshot expired or access changed.
+        snap = db.get(SyncSnapshot, str(snapshot_id))
+        if snap is None or snap.user_id != user.id:
+            raise HTTPException(404, 'Snapshot not found')
+        db.delete(snap)
+        db.commit()
+        return Response(status_code=204)
+
     @app.put('/notes/{note_id}')
-    def put_note(note_id: uuid.UUID, data: NoteInput, db: DB, user: Current):
+    def put_note(note_id: uuid.UUID, data: NoteInput, db: DB, user: Current,
+                 idempotency_key: Annotated[uuid.UUID | None, Header()] = None):
         from sqlalchemy.exc import IntegrityError
+        fingerprint, replay = begin_mutation(db, user, idempotency_key, 'PUT', note_id, data)
+        if replay is not None:
+            return replay
         note = db.get(Note, str(note_id))
         payload = data.model_dump(mode='json', exclude={'expected_version', 'family_id'})
         family_id = str(data.family_id) if data.family_id else None
@@ -316,7 +429,7 @@ def create_app(database_url: str | None = None):
                         payload=payload, version=1, deleted=0, updated_at=now())
             db.add(note)
             try:
-                db.commit()
+                db.flush()
             except IntegrityError:
                 db.rollback()
                 raise HTTPException(409, 'Concurrent creation; fetch remote state')
@@ -331,12 +444,15 @@ def create_app(database_url: str | None = None):
                 payload=payload, version=Note.version + 1, updated_at=now()))
             if changed.rowcount != 1:
                 raise HTTPException(409, 'Version conflict; fetch remote state')
-            db.commit()
             db.refresh(note)
-        return public_note(note)
+        return finish_mutation(db, user, idempotency_key, fingerprint, note)
 
     @app.delete('/notes/{note_id}')
-    def delete_note(note_id: uuid.UUID, data: DeleteInput, db: DB, user: Current):
+    def delete_note(note_id: uuid.UUID, data: DeleteInput, db: DB, user: Current,
+                    idempotency_key: Annotated[uuid.UUID | None, Header()] = None):
+        fingerprint, replay = begin_mutation(db, user, idempotency_key, 'DELETE', note_id, data)
+        if replay is not None:
+            return replay
         note = db.get(Note, str(note_id))
         if note is not None and note.family_id:
             lock_family(db, note.family_id)
@@ -346,8 +462,7 @@ def create_app(database_url: str | None = None):
             deleted=1, payload={}, version=Note.version + 1, updated_at=now()))
         if changed.rowcount != 1:
             raise HTTPException(409, 'Version conflict; fetch remote state')
-        db.commit()
         db.refresh(note)
-        return public_note(note)
+        return finish_mutation(db, user, idempotency_key, fingerprint, note)
 
     return app
