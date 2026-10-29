@@ -49,6 +49,10 @@ dependencies:
   app_links: ^6.3.2               # deep links семейных инвайтов
   http: ^1.2.2                 # AI-распознавание (OpenAI-совместимые API) и загрузка Vosk-модели
 
+  # Cloud session (platform keystore) and transactional offline queue
+  flutter_secure_storage: ^9.2.4
+  sqflite: ^2.4.1
+
   # Sharing / export / invites
   share_plus: ^7.2.2
   qr_flutter: ^4.1.0

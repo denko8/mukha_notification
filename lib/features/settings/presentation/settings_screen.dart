@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../app/providers.dart';
+import '../../cloud/presentation/cloud_screen.dart';
 import '../../../core/services/notification_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../models/app_settings.dart';
@@ -24,6 +25,15 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Card(child: ListTile(
+            leading: const Icon(Icons.cloud_outlined),
+            title: const Text('Облачное пространство'),
+            subtitle: const Text('Тестовый режим · отдельный аккаунт и очередь'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => const CloudScreen(),
+            )),
+          )),
           _Section(
             title: 'Профиль',
             child: ListTile(
