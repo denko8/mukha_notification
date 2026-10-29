@@ -12,7 +12,8 @@ import '../core/services/share_service.dart';
 import '../core/services/sync_service.dart';
 import '../core/services/voice_input_service.dart';
 import '../core/services/voice_model_service.dart';
-import '../core/services/vosk_voice_service.dart';
+import '../core/services/vosk_voice_service_stub.dart'
+    if (dart.library.io) '../core/services/vosk_voice_service.dart';
 import '../features/ai/ai_connection_service.dart';
 import '../features/ai/ai_reminder_parser.dart';
 import '../features/ai/llm/ai_client_factory.dart';

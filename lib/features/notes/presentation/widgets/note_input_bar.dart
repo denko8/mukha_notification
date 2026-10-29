@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -206,6 +208,14 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
   }
 
   Future<void> _toggleVoice() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(
+          'Офлайн-диктовка доступна в Android-приложении. Здесь можно вводить текст.',
+        )),
+      );
+      return;
+    }
     if (_listening) {
       _cancelSilenceTimer();
       await ref.read(voiceInputServiceProvider).stopListening();
