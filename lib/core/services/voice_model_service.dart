@@ -76,6 +76,9 @@ class VoiceModelState {
 class VoiceModelService extends StateNotifier<VoiceModelState> {
   VoiceModelService() : super(const VoiceModelState.initial());
 
+  /// Read-only snapshot for services outside the StateNotifier subclass.
+  VoiceModelState get currentState => state;
+
   /// Маленькая русская модель Vosk — компромисс точности и размера
   /// (~45 МБ zip, ~90 МБ после распаковки, работает на CPU телефона).
   static const String modelName = 'vosk-model-small-ru-0.22';

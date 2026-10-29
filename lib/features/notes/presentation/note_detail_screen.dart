@@ -91,7 +91,7 @@ class NoteDetailScreen extends ConsumerWidget {
           pw.Header(
             level: 0,
             child: pw.Text('Smart Notes — заметка',
-                style: const pw.TextStyle(
+                style: pw.TextStyle(
                     fontSize: 20, fontWeight: pw.FontWeight.bold)),
           ),
           pw.SizedBox(height: 12),

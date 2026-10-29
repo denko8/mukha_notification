@@ -15,3 +15,6 @@ analyzer:
     # Справочные реализации Firebase подключаются после flutterfire configure
     # и намеренно не компилируются без firebase-зависимостей в проекте.
     - "docs/firebase/**"
+    # Upstream plugin tests require their own `flutter pub get` in the package.
+    # Keep the vendored runtime lib analyzed by the application.
+    - "third_party/vosk_flutter/test/**"

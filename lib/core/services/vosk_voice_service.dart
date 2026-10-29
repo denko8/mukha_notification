@@ -32,7 +32,7 @@ class VoskVoiceService implements VoiceInputService {
 
   @override
   Future<VoiceCheckResult> ensureAvailable() async {
-    final st = _models.state;
+    final st = _models.currentState;
     if (st.phase != VoiceModelPhase.ready || st.modelPath == null) {
       return const VoiceCheckResult(
         VoiceAvailability.modelNotDownloaded,
@@ -69,7 +69,7 @@ class VoskVoiceService implements VoiceInputService {
       // занимает 1–3 секунды, повторно платить этой ценой нельзя.
       if (_model == null) {
         debugPrint('[VOSK] загрузка модели в память…');
-        _model = await _plugin.createModel(_models.state.modelPath!);
+        _model = await _plugin.createModel(_models.currentState.modelPath!);
       }
       _recognizer ??= await _plugin.createRecognizer(
         model: _model!,
