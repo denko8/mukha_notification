@@ -9,9 +9,10 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, create_engine, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from .limits import RequestLimits
 
 
 def now():
@@ -99,7 +100,7 @@ class NoteInput(Input):
     family_id: uuid.UUID | None = None
     expected_version: int = Field(ge=0)
     text: str = Field(min_length=1, max_length=20000)
-    reminder_at: datetime | None = None
+    reminder_at: AwareDatetime | None = None
     done: bool = False
     category: str = Field(default='general', min_length=1, max_length=100)
 
@@ -119,7 +120,8 @@ def create_app(database_url: str | None = None):
         raise RuntimeError('DATABASE_URL must be configured')
     engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    app = FastAPI(title='Smart Notes API', version='0.1.0')
+    app = FastAPI(title='Smart Notes API', version='0.2.0')
+    app.add_middleware(RequestLimits)
     app.state.engine = engine
     password_hash = PasswordHash.recommended()
     # Avoid skipping the expensive password check for unknown accounts.
@@ -170,6 +172,15 @@ def create_app(database_url: str | None = None):
     @app.get('/health')
     def health():
         return {'status': 'ok'}
+
+    @app.get('/ready')
+    def ready(db: DB):
+        # Liveness is separate: readiness requires a reachable, initialized DB.
+        try:
+            db.execute(select(User.id).limit(1))
+        except Exception:
+            raise HTTPException(503, 'Database not ready')
+        return {'status': 'ready'}
 
     @app.post('/auth/register', status_code=201)
     def register(data: Registration, db: DB):
@@ -238,6 +249,7 @@ def create_app(database_url: str | None = None):
         invitation = db.scalar(select(Invite).where(Invite.token_hash == digest(data.token)))
         if invitation is None or invitation.used or aware(invitation.expires) <= now():
             raise HTTPException(404, 'Invite invalid or expired')
+        lock_family(db, invitation.family_id)
         if db.get(Member, (invitation.family_id, user.id)):
             raise HTTPException(409, 'Already a member')
         # Conditional update makes consumption single-use even for concurrent requests.
@@ -249,6 +261,34 @@ def create_app(database_url: str | None = None):
         db.add(Member(family_id=invitation.family_id, user_id=user.id))
         db.commit()
         return dict(family_id=invitation.family_id)
+
+    def lock_family(db, family_id):
+        return db.scalar(select(Family).where(Family.id == family_id).with_for_update())
+
+    @app.delete('/families/{family_id}/invites', status_code=204)
+    def revoke_invites(family_id: uuid.UUID, db: DB, user: Current):
+        family = lock_family(db, str(family_id))
+        if family is None or family.owner_id != user.id:
+            raise HTTPException(404, 'Family not found')
+        db.execute(update(Invite).where(Invite.family_id == str(family_id)).values(used=1))
+        db.commit()
+        return Response(status_code=204)
+
+    @app.delete('/families/{family_id}/members/{member_id}', status_code=204)
+    def remove_member(family_id: uuid.UUID, member_id: uuid.UUID, db: DB, user: Current):
+        family = lock_family(db, str(family_id))
+        family_access(db, str(family_id), user)
+        target = str(member_id)
+        if family.owner_id == target:
+            raise HTTPException(409, 'Owner cannot leave; ownership transfer is not implemented yet')
+        if target != user.id and family.owner_id != user.id:
+            raise HTTPException(403, 'Only owner can remove other members')
+        member = db.get(Member, (str(family_id), target))
+        if member is None:
+            raise HTTPException(404, 'Member not found')
+        db.delete(member)
+        db.commit()
+        return Response(status_code=204)
 
     @app.get('/notes')
     def notes(db: DB, user: Current, offset: int = 0, limit: int = 100):
@@ -270,6 +310,7 @@ def create_app(database_url: str | None = None):
             if data.expected_version != 0:
                 raise HTTPException(409, 'Note missing; fetch remote state')
             if family_id:
+                lock_family(db, family_id)
                 family_access(db, family_id, user)
             note = Note(id=str(note_id), owner_id=user.id, family_id=family_id,
                         payload=payload, version=1, deleted=0, updated_at=now())
@@ -280,6 +321,8 @@ def create_app(database_url: str | None = None):
                 db.rollback()
                 raise HTTPException(409, 'Concurrent creation; fetch remote state')
         else:
+            if note.family_id:
+                lock_family(db, note.family_id)
             note_access(db, note, user)
             if family_id != note.family_id:
                 raise HTTPException(422, 'Moving notes between scopes is not supported yet')
@@ -295,6 +338,8 @@ def create_app(database_url: str | None = None):
     @app.delete('/notes/{note_id}')
     def delete_note(note_id: uuid.UUID, data: DeleteInput, db: DB, user: Current):
         note = db.get(Note, str(note_id))
+        if note is not None and note.family_id:
+            lock_family(db, note.family_id)
         note_access(db, note, user)
         changed = db.execute(update(Note).where(Note.id == note.id,
             Note.version == data.expected_version, Note.deleted == 0).values(

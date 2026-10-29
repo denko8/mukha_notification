@@ -3,16 +3,42 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import Base, create_app
+from app.main import create_app
 
 
 @pytest.fixture
-def client(tmp_path):
-    app = create_app(f'sqlite:///{tmp_path}/test.db')
-    Base.metadata.create_all(app.state.engine)
-    with TestClient(app) as client:
-        yield client
-    app.state.engine.dispose()
+def client(tmp_path, monkeypatch):
+    import os
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import make_url
+    from pathlib import Path
+
+    postgres = os.environ.get('TEST_POSTGRES_URL')
+    admin = None
+    if postgres:
+        database = 'test_' + uuid.uuid4().hex
+        url = make_url(postgres)
+        admin = create_engine(url.set(database='postgres'), isolation_level='AUTOCOMMIT')
+        with admin.connect() as conn:
+            conn.execute(text(f'CREATE DATABASE "{database}"'))
+        database_url = url.set(database=database).render_as_string(hide_password=False)
+    else:
+        database_url = f'sqlite:///{tmp_path}/test.db'
+    monkeypatch.setenv('DATABASE_URL', database_url)
+    config = Config(str(Path(__file__).resolve().parents[1] / 'alembic.ini'))
+    command.upgrade(config, 'head')
+    app = create_app(database_url)
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.state.engine.dispose()
+        if admin is not None:
+            with admin.connect() as conn:
+                conn.execute(text(f'DROP DATABASE "{database}"'))
+            admin.dispose()
 
 
 def account(client, email):
@@ -112,3 +138,94 @@ def test_cannot_supply_author_or_other_unrecognized_fields(client):
         'text': 'Заметка', 'expected_version': 0, 'author_id': 'someone-else',
     })
     assert response.status_code == 422
+
+
+def test_member_removal_and_revoked_invites(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    eve = account(client, 'e@example.com')
+    aid = client.get('/me', headers=alice).json()['id']
+    bid = client.get('/me', headers=bob).json()['id']
+    fid = client.post('/families', headers=alice, json={'name': 'Дом'}).json()['id']
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    client.post('/families/join', headers=bob, json={'token': token})
+    nid = str(uuid.uuid4())
+    put(client, alice, nid, family_id=fid)
+    assert client.delete(f'/families/{fid}/members/{aid}', headers=alice).status_code == 409
+    assert client.delete(f'/families/{fid}/members/{aid}', headers=bob).status_code == 409
+    assert client.delete(f'/families/{fid}/members/{bid}', headers=alice).status_code == 204
+    assert client.get('/notes', headers=bob).json() == []
+    assert put(client, bob, nid, 1, fid).status_code == 404
+    assert client.get(f'/families/{fid}/members', headers=bob).status_code == 404
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    assert client.delete(f'/families/{fid}/invites', headers=alice).status_code == 204
+    assert client.post('/families/join', headers=eve, json={'token': token}).status_code == 404
+
+
+def test_member_can_leave_without_owner_removal(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    bid = client.get('/me', headers=bob).json()['id']
+    fid = client.post('/families', headers=alice, json={'name': 'Дом'}).json()['id']
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    client.post('/families/join', headers=bob, json={'token': token})
+    assert client.delete(f'/families/{fid}/members/{bid}', headers=bob).status_code == 204
+    assert client.get('/families', headers=bob).json() == []
+
+
+def test_body_and_rate_limits(client):
+    assert client.post('/auth/login', content=b'x' * 131073).status_code == 413
+    responses = [client.post('/auth/login', json={
+        'email': 'invalid@example.com', 'password': 'long-test-password-123',
+    }).status_code for _ in range(21)]
+    assert 429 in responses
+    assert client.get('/health').status_code == 200
+
+
+def test_ready_requires_schema(tmp_path):
+    app = create_app(f'sqlite:///{tmp_path}/empty.db')
+    with TestClient(app) as client:
+        assert client.get('/health').status_code == 200
+        assert client.get('/ready').status_code == 503
+    app.state.engine.dispose()
+
+
+def test_concurrent_note_updates_have_one_winner(client):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    alice = account(client, 'a@example.com')
+    nid = str(uuid.uuid4())
+    put(client, alice, nid)
+    barrier = Barrier(2)
+
+    def change(text):
+        barrier.wait(timeout=10)
+        return put(client, alice, nid, 1, text=text).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(change, ['Первое устройство', 'Второе устройство']))
+    assert sorted(results) == [200, 409]
+    assert client.get('/notes', headers=alice).json()[0]['version'] == 2
+
+
+def test_concurrent_invite_acceptance_is_single_use(client):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    eve = account(client, 'e@example.com')
+    fid = client.post('/families', headers=alice, json={'name': 'Дом'}).json()['id']
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    barrier = Barrier(2)
+
+    def join(headers):
+        barrier.wait(timeout=10)
+        return client.post('/families/join', headers=headers, json={'token': token}).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(join, [bob, eve]))
+    assert results.count(200) == 1
+    assert all(code in (200, 404, 409) for code in results)
+    assert len(client.get(f'/families/{fid}/members', headers=alice).json()) == 2
