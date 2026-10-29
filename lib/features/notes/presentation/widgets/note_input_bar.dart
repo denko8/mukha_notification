@@ -269,7 +269,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
                       Text(
                         'Не удалось скачать: ${state.error ?? 'ошибка сети'}. '
                         'Проверьте интернет и попробуйте снова.',
-                        style: TextStyle(color: AppColors.danger),
+                        style: const TextStyle(color: AppColors.danger),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -327,8 +327,8 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
     if (!check.ok || !mounted) {
       if (check.availability == VoiceAvailability.permissionDenied) {
         messenger.showSnackBar(
-          SnackBar(
-            content: const Text(
+          const SnackBar(
+            content: Text(
               'Нет доступа к микрофону — включите его в настройках '
               'приложения, чтобы диктовать заметки.',
             ),

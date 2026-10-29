@@ -37,17 +37,17 @@ class _MainScaffoldState extends State<MainScaffold> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations:   [
           NavigationDestination(
-            icon: Icon(Icons.home_outlined),
+            icon: const Icon(Icons.home_outlined),
             selectedIcon: Icon(Icons.home, color: AppColors.gold),
             label: 'Home',
           ),
           NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
+            icon: const Icon(Icons.groups_outlined),
             selectedIcon: Icon(Icons.groups, color: AppColors.gold),
             label: 'Family',
           ),
           NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
+            icon: const Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings, color: AppColors.gold),
             label: 'Settings',
           ),
@@ -66,12 +66,12 @@ class _WebPreviewBanner extends StatelessWidget {
     return  Material(
       color: AppColors.goldSoft,
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.info_outline, size: 14, color: AppColors.gold),
-            SizedBox(width: 6),
+            const SizedBox(width: 6),
             Flexible(
               child: Text(
                 'Web-превью: данные хранятся в памяти вкладки и сбросятся '

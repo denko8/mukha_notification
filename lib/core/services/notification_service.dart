@@ -110,7 +110,7 @@ class LocalNotificationService implements NotificationService {
       return;
     }
 
-    final details = NotificationDetails(
+    const details = NotificationDetails(
       android: AndroidNotificationDetails(
         'smart_notes_reminders',
         'Напоминания',
@@ -120,7 +120,7 @@ class LocalNotificationService implements NotificationService {
         category: AndroidNotificationCategory.reminder,
         visibility: NotificationVisibility.public,
       ),
-      iOS: const DarwinNotificationDetails(),
+      iOS: DarwinNotificationDetails(),
     );
     final tzWhen = tz.TZDateTime.from(when, tz.local);
     debugPrint(

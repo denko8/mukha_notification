@@ -508,9 +508,9 @@ class _Section extends StatelessWidget {
 class _SyncSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return _Section(
+    return const _Section(
       title: 'Хранение данных',
-      child: const ListTile(
+      child: ListTile(
         leading: Icon(Icons.phone_android_outlined),
         title: Text('Только на этом устройстве'),
         subtitle: Text(

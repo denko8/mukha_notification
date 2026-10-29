@@ -119,7 +119,7 @@ class NoteDetailScreen extends ConsumerWidget {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Удалить', style: TextStyle(color: AppColors.danger)),
+            child: const Text('Удалить', style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -370,7 +370,7 @@ class _AttachmentTile extends ConsumerWidget {
       case AttachmentType.pdf:
         return Card(
           child: ListTile(
-            leading: Icon(Icons.picture_as_pdf_outlined, color: AppColors.danger),
+            leading: const Icon(Icons.picture_as_pdf_outlined, color: AppColors.danger),
             title: Text(attachment.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: const Text('PDF-документ'),
             trailing: TextButton(
