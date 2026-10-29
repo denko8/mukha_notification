@@ -12,8 +12,9 @@ class CloudWorkspace {
   Map<String, dynamic> get notes => state['notes'] as Map<String, dynamic>;
 
   Future<void> _commit(Map<String, dynamic> next) async {
-    await persist(next);
-    state = next;
+    final merged = {...state, ...next};
+    await persist(merged);
+    state = merged;
   }
 
   Future<void> _tail = Future<void>.value();
@@ -123,43 +124,96 @@ class CloudWorkspace {
         await _commit({'notes': {...notes, id: {...entry, 'conflict': remote}}});
       }
     }
-    final snapshot = await api.request('POST', '/sync/snapshots');
-    final sid = snapshot['snapshot_id'] as String;
-    try {
-      var offset = 0;
+    await _pullChanges();
+  }
+
+  Future<void> _pullChanges() async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      var cursor = state['cursor'] as String?;
+      final bootstrap = cursor == null;
       final staged = <String, dynamic>{};
-      while (true) {
-        final page = await api.request('GET', '/sync/snapshots/$sid?offset=$offset&limit=100');
-        if (page['snapshot_id'] != sid || page['total'] != snapshot['total']) {
-          throw StateError('Некорректный снимок сервера. Данные не применены.');
+      try {
+        for (var pageNumber = 0; pageNumber < 100; pageNumber++) {
+          final query = Uri(queryParameters: {
+            if (cursor != null) 'cursor': cursor, 'limit': '100',
+          }).query;
+          final page = await api.request('GET', '/sync/changes?$query');
+          if (page['cursor'] is! String || page['has_more'] is! bool ||
+              page['notes'] is! List || page['family_ids'] is! List) {
+            throw StateError('Некорректная страница изменений. Кэш не заменён.');
+          }
+          final scopes = (page['family_ids'] as List).cast<String>();
+          if (bootstrap && pageNumber == 0) {
+            final permitted = Map<String, dynamic>.from(notes);
+            var changed = false;
+            for (final id in permitted.keys.toList()) {
+              final local = permitted[id] as Map;
+              final family = local['note']['family_id'];
+              if (family != null && !scopes.contains(family)) {
+                changed = true;
+                if (local['operation'] != null) {
+                  permitted[id] = {'note': {...local['note'] as Map, 'family_id': null},
+                    'blocked': 'Доступ к семье отозван. Сохранён личный черновик.'};
+                } else { permitted.remove(id); }
+              }
+            }
+            // Drop revoked scopes as soon as the server confirms permissions,
+            // even if a later bootstrap page fails to download.
+            if (changed) await _commit({'notes': permitted, 'cursor': null});
+          }
+          final next = page['cursor'] as String;
+          if (page['has_more'] == true && next == cursor) throw StateError('Курсор не продвинулся.');
+          for (final row in page['notes'] as List) {
+            if (row['id'] is! String || row['version'] is! int) throw StateError('Некорректная версия заметки');
+            final previous = staged[row['id']];
+            if (previous == null || previous['note']['version'] <= row['version']) {
+              staged[row['id'] as String] = {'note': row};
+            }
+          }
+          final complete = page['has_more'] == false;
+          if (!bootstrap || complete) {
+            final merged = bootstrap ? <String, dynamic>{} : Map<String, dynamic>.from(notes);
+            for (final id in merged.keys.toList()) {
+              final entry = merged[id] as Map;
+              final familyId = entry['note']['family_id'];
+              if (familyId != null && !scopes.contains(familyId)) {
+                if (entry['operation'] != null) {
+                  merged[id] = {'note': {...entry['note'] as Map, 'family_id': null},
+                    'blocked': 'Доступ к семье отозван. Сохранён личный черновик.'};
+                } else { merged.remove(id); }
+              }
+            }
+            for (final entry in staged.entries) {
+              final local = notes[entry.key] as Map?;
+              if (local != null && (local['operation'] != null || local['blocked'] != null ||
+                  (local['note']['version'] as int) > (entry.value['note']['version'] as int))) {
+                merged[entry.key] = local;
+              } else { merged[entry.key] = entry.value; }
+            }
+            if (bootstrap) {
+              for (final id in notes.keys) {
+                final local = notes[id] as Map;
+                if (local['operation'] != null || local['blocked'] != null) {
+                  final family = local['note']['family_id'];
+                  merged[id] = family != null && !scopes.contains(family)
+                    ? {'note': {...local['note'] as Map, 'family_id': null},
+                       'blocked': 'Доступ к семье отозван. Сохранён личный черновик.'} : local;
+                }
+              }
+            }
+            // Cursor and merged notes commit as ONE SQLite document transaction.
+            await _commit({'notes': merged, 'cursor': next});
+            staged.clear();
+          }
+          cursor = next;
+          if (complete) return;
         }
-        for (final row in page['notes'] as List) {
-          if (staged.containsKey(row['id'])) throw StateError('Повтор записи в снимке');
-          staged[row['id'] as String] = {'note': row};
-        }
-        final next = page['next_offset'] as int?;
-        if (next == null) break;
-        if (next <= offset) throw StateError('Некорректная страница снимка');
-        offset = next;
+        throw StateError('Много изменений. Повторите обмен, чтобы продолжить.');
+      } on CloudApiException catch (error) {
+        if (error.status != 409 || error.code != 'sync_reset') rethrow;
+        await _commit({'cursor': null});
       }
-      if (staged.length != snapshot['total']) throw StateError('Снимок неполный');
-      await api.request('GET', '/sync/snapshots/$sid?limit=1');
-      final scopes = (snapshot['family_ids'] as List).cast<String>();
-      for (final id in notes.keys) {
-        final entry = notes[id] as Map;
-        final note = entry['note'] as Map;
-        final familyId = note['family_id'];
-        if (familyId != null && !scopes.contains(familyId)) continue;
-        if (entry['operation'] != null || entry['blocked'] != null ||
-            (staged[id] != null && (note['version'] as int) >
-              (staged[id]['note']['version'] as int))) {
-          staged[id] = entry;
-        }
-      }
-      await _commit({'notes': staged});
-    } finally {
-      // Release is best effort: expiry will clean up if the connection is lost.
-      try { await api.request('DELETE', '/sync/snapshots/$sid'); } catch (_) {}
     }
+    throw StateError('Семейные права изменяются. Повторите синхронизацию.');
   }
 }

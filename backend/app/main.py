@@ -11,9 +11,11 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, LargeBinary, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, update
+from sqlalchemy import BigInteger, Index, JSON, LargeBinary, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from .limits import RequestLimits
+from .objects import configured_objects
+from . import cursors
 
 
 def now():
@@ -102,7 +104,45 @@ class Attachment(Base):
     mime: Mapped[str] = mapped_column(String(80))
     size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
-    data: Mapped[bytes] = mapped_column(LargeBinary)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    object_key: Mapped[str | None] = mapped_column(String(240), nullable=True)
+
+
+class SyncClock(Base):
+    __tablename__ = 'sync_clock'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[int] = mapped_column(BigInteger)
+    secret: Mapped[str] = mapped_column(String(64))
+
+
+class NoteChange(Base):
+    __tablename__ = 'note_changes'
+    __table_args__ = (Index('ix_changes_owner_scope', 'owner_id', 'family_id', 'position'),
+                      Index('ix_changes_family_scope', 'family_id', 'position'))
+    note_id: Mapped[str] = mapped_column(ForeignKey('notes.id'), primary_key=True)
+    position: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    owner_id: Mapped[str] = mapped_column(String(36))
+    family_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class CloudPlan(Base):
+    __tablename__ = 'cloud_plans'
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), primary_key=True)
+    tier: Mapped[str] = mapped_column(String(20))
+    expires: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ObjectGarbage(Base):
+    __tablename__ = 'object_garbage'
+    key: Mapped[str] = mapped_column(String(240), primary_key=True)
+
+
+class Usage(Base):
+    __tablename__ = 'cloud_usage'
+    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), primary_key=True)
+    uploaded_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    download_granted_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    sync_response_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
 
 
 class Input(BaseModel):
@@ -145,15 +185,17 @@ def aware(value):
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def create_app(database_url: str | None = None):
+def create_app(database_url: str | None = None, *, object_store=None):
     database_url = database_url or os.environ.get('DATABASE_URL')
     if not database_url:
         raise RuntimeError('DATABASE_URL must be configured')
     engine = create_engine(database_url, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    app = FastAPI(title='Smart Notes API', version='0.3.0')
+    app = FastAPI(title='Smart Notes API', version='0.4.0')
     app.add_middleware(RequestLimits)
     app.state.engine = engine
+    objects = object_store if object_store is not None else configured_objects()
+    app.state.objects = objects
     password_hash = PasswordHash.recommended()
     # Avoid skipping the expensive password check for unknown accounts.
     dummy_hash = password_hash.hash(secrets.token_urlsafe(32))
@@ -199,6 +241,46 @@ def create_app(database_url: str | None = None):
                         db.execute(select(Attachment.id, Attachment.name, Attachment.mime, Attachment.size, Attachment.sha256)
                             .where(Attachment.note_id == note.id).order_by(Attachment.id))],
                     **note.payload)
+
+    def publish(db, note):
+        # LAST lock in mutation transactions. Held through COMMIT: a position can
+        # never be skipped because a lower-numbered transaction committed later.
+        clock = db.scalar(select(SyncClock).where(SyncClock.id == 1).with_for_update())
+        clock.position += 1
+        change = db.get(NoteChange, note.id)
+        if change is None:
+            db.add(NoteChange(note_id=note.id, position=clock.position,
+                              owner_id=note.owner_id, family_id=note.family_id))
+        else:
+            change.position = clock.position
+
+    def plan_info(db, user):
+        plan = db.get(CloudPlan, user.id)
+        paid = plan is not None and plan.tier == 'cloud' and (plan.expires is None or aware(plan.expires) > now())
+        quota = 1024 * 1024 * 1024 if paid else 0
+        used = db.scalar(select(func.coalesce(func.sum(Attachment.size), 0)).where(Attachment.uploader_id == user.id))
+        return dict(tier='cloud' if paid else 'free', quota_bytes=quota, used_bytes=used,
+                    max_file_bytes=5 * 1024 * 1024, max_note_bytes=20 * 1024 * 1024,
+                    cloud_upload_allowed=paid, object_storage_ready=objects is not None,
+                    expires_at=aware(plan.expires).isoformat() if plan and plan.expires else None)
+
+    def add_usage(db, user, field, amount):
+        usage = db.get(Usage, user.id)
+        if usage is None:
+            usage = Usage(user_id=user.id, uploaded_bytes=0, download_granted_bytes=0, sync_response_bytes=0)
+            db.add(usage)
+        setattr(usage, field, getattr(usage, field) + amount)
+
+    def storage():
+        if objects is None:
+            raise HTTPException(503, 'Private object storage is not configured')
+        return objects
+
+    def retire_objects(db, note_id):
+        for key in db.scalars(select(Attachment.object_key).where(Attachment.note_id == note_id,
+                                                                Attachment.object_key.is_not(None))):
+            if db.get(ObjectGarbage, key) is None:
+                db.add(ObjectGarbage(key=key))
 
     def issue_session(db, user):
         token = secrets.token_urlsafe(32)
@@ -352,7 +434,12 @@ def create_app(database_url: str | None = None):
                 raise HTTPException(409, 'Idempotency key reused for a different request')
             # A receipt must never bypass revoked family access.
             note_access(db, db.get(Note, receipt.note_id), user)
-            return fingerprint, receipt.result
+            result = dict(receipt.result)
+            if result.pop('_text_from_request', False):
+                # The fingerprint already authenticated the exact original body.
+                # Avoid retaining every historical note text in receipt storage.
+                result['text'] = data.text
+            return fingerprint, result
         if db.scalar(select(func.count()).select_from(MutationReceipt).where(
                 MutationReceipt.user_id == user.id)) >= 10000:
             raise HTTPException(429, 'Mutation receipt quota reached; contact administrator')
@@ -361,9 +448,14 @@ def create_app(database_url: str | None = None):
     def finish_mutation(db, user, key, fingerprint, note):
         result = public_note(note, db)
         if key is not None:
+            receipt_result = dict(result)
+            if 'text' in receipt_result:
+                receipt_result.pop('text')
+                receipt_result['_text_from_request'] = True
             db.add(MutationReceipt(user_id=user.id, operation_id=str(key),
-                request_hash=fingerprint, note_id=note.id, result=result))
-        # Receipt and note change are committed atomically, before replying.
+                request_hash=fingerprint, note_id=note.id, result=receipt_result))
+        publish(db, note)
+        # Receipt, feed position and note change commit atomically.
         db.commit()
         return result
 
@@ -410,13 +502,27 @@ def create_app(database_url: str | None = None):
         total = db.scalar(select(func.coalesce(func.sum(Attachment.size), 0)).where(Attachment.uploader_id == user.id))
         note_size = db.scalar(select(func.coalesce(func.sum(Attachment.size), 0)).where(Attachment.note_id == str(note_id)))
         count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.note_id == str(note_id)))
-        if total + len(raw) > 100 * 1024 * 1024 or note_size + len(raw) > 20 * 1024 * 1024 or count >= 10:
+        plan = plan_info(db, user)
+        if not plan['cloud_upload_allowed']:
+            raise HTTPException(402, detail={'code': 'cloud_plan_required', 'message': 'Cloud copy requires a server-verified plan'})
+        if total + len(raw) > plan['quota_bytes'] or note_size + len(raw) > 20 * 1024 * 1024 or count >= 10:
             raise HTTPException(413, 'Attachment storage quota reached')
+        key = f'attachments/{user.id}/{attachment_id}/{checksum}'
+        if db.get(ObjectGarbage, key) is not None:
+            raise HTTPException(409, 'This retired object ID cannot be reused yet')
+        try:
+            storage().put(key, raw, mime)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(503, 'Object upload unavailable; retry with the same ID')
         item = Attachment(id=str(attachment_id), note_id=str(note_id), uploader_id=user.id,
-                          name=name, mime=mime, size=len(raw), sha256=checksum, data=raw)
+                          name=name, mime=mime, size=len(raw), sha256=checksum, data=None, object_key=key)
         db.add(item)
         try:
             db.execute(update(Note).where(Note.id == note.id).values(version=Note.version + 1, updated_at=now()))
+            add_usage(db, user, 'uploaded_bytes', len(raw))
+            publish(db, note)
             db.commit()
         except IntegrityError:
             db.rollback()
@@ -432,7 +538,19 @@ def create_app(database_url: str | None = None):
         item = db.get(Attachment, str(attachment_id))
         if item is None or item.note_id != str(note_id):
             raise HTTPException(404, 'Attachment not found')
-        return Response(item.data, media_type='application/octet-stream', headers={
+        try:
+            data = storage().get(item.object_key) if item.object_key else item.data
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(503, 'Object temporarily unavailable')
+        if data is None or len(data) != item.size or hashlib.sha256(data).hexdigest() != item.sha256:
+            raise HTTPException(503, 'Object integrity check failed')
+        # Compatibility download through API. New clients use short-lived S3 grants.
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        add_usage(db, user, 'download_granted_bytes', item.size)
+        db.commit()
+        return Response(data, media_type='application/octet-stream', headers={
             'Content-Disposition': 'attachment', 'X-Content-Type-Options': 'nosniff',
             'Cache-Control': 'no-store', 'X-Content-SHA256': item.sha256})
 
@@ -448,8 +566,11 @@ def create_app(database_url: str | None = None):
             return Response(status_code=204)
         if item.note_id != str(note_id):
             raise HTTPException(404, 'Attachment not found')
+        if item.object_key:
+            db.add(ObjectGarbage(key=item.object_key))
         db.delete(item)
         db.execute(update(Note).where(Note.id == note.id).values(version=Note.version + 1, updated_at=now()))
+        publish(db, note)
         db.commit()
         return Response(status_code=204)
 
@@ -458,6 +579,66 @@ def create_app(database_url: str | None = None):
         note = db.get(Note, str(note_id))
         note_access(db, note, user)
         return public_note(note, db)
+
+    @app.get('/cloud/usage')
+    def cloud_usage(db: DB, user: Current):
+        result = plan_info(db, user)
+        usage = db.get(Usage, user.id)
+        result['traffic'] = dict(uploaded_bytes=usage.uploaded_bytes if usage else 0,
+            download_granted_bytes=usage.download_granted_bytes if usage else 0,
+            sync_response_bytes=usage.sync_response_bytes if usage else 0)
+        return result
+
+    @app.get('/notes/{note_id}/attachments/{attachment_id}/download-url')
+    def download_grant(note_id: uuid.UUID, attachment_id: uuid.UUID, db: DB, user: Current):
+        note = db.get(Note, str(note_id))
+        note_access(db, note, user)
+        item = db.get(Attachment, str(attachment_id))
+        if note.deleted or item is None or item.note_id != str(note_id):
+            raise HTTPException(404, 'Attachment not found')
+        if not item.object_key:
+            return {'url': None, 'expires_in': 0}  # unmigrated legacy BYTEA
+        try:
+            url = storage().download_url(item.object_key)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(503, 'Object store unavailable')
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        add_usage(db, user, 'download_granted_bytes', item.size)
+        db.commit()
+        return {'url': url, 'expires_in': 60}
+
+    @app.get('/sync/changes')
+    def changes(db: DB, user: Current, cursor: str | None = None, limit: int = 100):
+        if not 1 <= limit <= 200:
+            raise HTTPException(422, 'Invalid page size')
+        # No user/family locks AFTER this lock; publishers acquire this lock last.
+        # Also serializes usage counters with the same clock, avoiding lock inversion.
+        clock = db.scalar(select(SyncClock).where(SyncClock.id == 1).with_for_update())
+        scopes = sorted(db.scalars(select(Member.family_id).where(Member.user_id == user.id)))
+        try:
+            position = cursors.decode(clock.secret, cursor, user.id, scopes) if cursor else 0
+        except LookupError:
+            raise HTTPException(409, detail={'code': 'sync_reset', 'message': 'Family scope changed or cursor expired'})
+        except ValueError:
+            raise HTTPException(422, detail={'code': 'invalid_cursor'})
+        if position > clock.position:
+            raise HTTPException(409, detail={'code': 'sync_reset', 'message': 'Server restore requires a fresh cursor'})
+        accessible = ((NoteChange.owner_id == user.id) & NoteChange.family_id.is_(None)) | NoteChange.family_id.in_(scopes)
+        events = list(db.scalars(select(NoteChange).where(accessible, NoteChange.position > position)
+            .order_by(NoteChange.position).limit(limit + 1)))
+        more = len(events) > limit
+        page = events[:limit]
+        rows = [public_note(db.get(Note, event.note_id), db) for event in page]
+        end = page[-1].position if more else clock.position
+        result = dict(notes=rows, cursor=cursors.encode(clock.secret, user.id, end, scopes),
+                      has_more=more, family_ids=scopes)
+        db.commit()  # release feed lock BEFORE acquiring user lock for accounting
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        add_usage(db, user, 'sync_response_bytes', len(json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode()))
+        db.commit()
+        return result
 
     @app.post('/sync/snapshots', status_code=201)
     def snapshot(db: DB, user: Current):
@@ -573,6 +754,7 @@ def create_app(database_url: str | None = None):
             deleted=1, payload={}, version=Note.version + 1, updated_at=now()))
         if changed.rowcount != 1:
             raise HTTPException(409, 'Version conflict; fetch remote state')
+        retire_objects(db, note.id)
         db.execute(delete(Attachment).where(Attachment.note_id == note.id))
         db.refresh(note)
         return finish_mutation(db, user, idempotency_key, fingerprint, note)

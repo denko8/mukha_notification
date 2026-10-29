@@ -88,7 +88,7 @@ void main() {
     api.close();
   });
 
-  test('Incomplete snapshot never replaces the existing cache', () async {
+  test('Malformed change page never replaces the existing cache', () async {
     final original = {'notes': <String, dynamic>{'local': {'note': {
       'id': 'local', 'version': 1, 'text': 'Сохранено', 'family_id': null,
     }}}};
@@ -106,7 +106,7 @@ void main() {
     api.close();
   });
 
-  test('Expired snapshot does not delete queued or cached data', () async {
+  test('Failed change download does not delete cached data', () async {
     final api = CloudApi('https://example.com', client: MockClient((request) async {
       if (request.method == 'POST') return http.Response(jsonEncode({
         'snapshot_id': 's', 'total': 0, 'family_ids': [],
@@ -189,8 +189,7 @@ void main() {
         'snapshot_id': 's', 'total': 0, 'family_ids': [],
       }), 201);
       if (request.method == 'DELETE') return http.Response('', 204);
-      return http.Response(jsonEncode({'snapshot_id': 's', 'total': 0,
-        'family_ids': [], 'notes': [], 'next_offset': null}), 200);
+      return http.Response(jsonEncode({'cursor': 'cursor-1', 'has_more': false, 'family_ids': [], 'notes': []}), 200);
     }));
     final workspace = CloudWorkspace(api, emptyState(), (_) async {});
     await workspace.create('Не потерять правку', familyId: 'f');
@@ -200,6 +199,66 @@ void main() {
     expect(workspace.notes[id]['note']['family_id'], isNull);
     expect(workspace.notes[id]['operation'], isNull);
     expect(workspace.notes[id]['blocked'], isNotNull);
+    api.close();
+  });
+
+  test('Delta cursor survives local mutation and is sent on the next pull', () async {
+    final calls = <String>[];
+    final api = CloudApi('https://example.com', client: MockClient((request) async {
+      calls.add(request.url.path);
+      expect(request.url.queryParameters['cursor'], 'old-cursor');
+      return http.Response(jsonEncode({'cursor': 'new-cursor', 'has_more': false,
+        'family_ids': [], 'notes': [{'id': 'n', 'version': 2, 'text': 'Новое', 'family_id': null}]}), 200);
+    }));
+    final workspace = CloudWorkspace(api, {'cursor': 'old-cursor', 'notes': <String, dynamic>{
+      'n': {'note': {'id': 'n', 'version': 1, 'text': 'Старое', 'family_id': null}},
+      'untouched': {'note': {'id': 'untouched', 'version': 1, 'text': 'Без изменений', 'family_id': null}},
+    }}, (_) async {});
+    await workspace.sync();
+    expect(workspace.state['cursor'], 'new-cursor');
+    expect(workspace.notes['n']['note']['text'], 'Новое');
+    expect(workspace.notes, contains('untouched'));
+    expect(calls, ['/sync/changes']);
+    api.close();
+  });
+
+  test('Cursor reset bootstraps without leaking revoked family cache', () async {
+    var requests = 0;
+    final api = CloudApi('https://example.com', client: MockClient((request) async {
+      requests++;
+      if (requests == 1) return http.Response(jsonEncode({'detail': {'code': 'sync_reset'}}), 409);
+      expect(request.url.queryParameters.containsKey('cursor'), isFalse);
+      return http.Response(jsonEncode({'cursor': 'reset-cursor', 'has_more': false,
+        'family_ids': [], 'notes': []}), 200);
+    }));
+    final workspace = CloudWorkspace(api, {'cursor': 'old', 'notes': <String, dynamic>{
+      'family-note': {'note': {'id': 'family-note', 'version': 1, 'text': 'Отозвано', 'family_id': 'f'}},
+    }}, (_) async {});
+    await workspace.sync();
+    expect(workspace.notes, isEmpty);
+    expect(workspace.state['cursor'], 'reset-cursor');
+    api.close();
+  });
+
+  test('Failed page commit never advances the durable cursor', () async {
+    final api = CloudApi('https://example.com', client: MockClient((request) async =>
+      http.Response(jsonEncode({'cursor': 'new', 'has_more': false, 'family_ids': [], 'notes': []}), 200)));
+    final workspace = CloudWorkspace(api, {'cursor': 'old', 'notes': <String, dynamic>{}},
+      (_) async => throw StateError('disk full'));
+    await expectLater(workspace.sync(), throwsStateError);
+    expect(workspace.state['cursor'], 'old');
+    api.close();
+  });
+
+  test('Object download never forwards backend bearer token', () async {
+    final api = CloudApi('https://api.example.com', token: 'secret', client: MockClient((request) async {
+      expect(request.url.host, 'objects.example.com');
+      expect(request.headers.containsKey('Authorization'), isFalse);
+      expect(request.headers.containsKey('authorization'), isFalse);
+      expect(request.followRedirects, isFalse);
+      return http.Response.bytes([1, 2, 3], 200);
+    }));
+    expect(await api.downloadObject('https://objects.example.com/key?signature=test'), [1, 2, 3]);
     api.close();
   });
 

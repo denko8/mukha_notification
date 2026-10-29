@@ -16,16 +16,18 @@ class CloudStore {
 
   static Future<CloudStore> open(String namespace) async {
     final db = await openDatabase(p.join(await getDatabasesPath(), 'cloud_v1.db'),
-      version: 3, onCreate: (db, _) async {
+      version: 4, onCreate: (db, _) async {
         await db.execute('CREATE TABLE workspaces (namespace TEXT PRIMARY KEY, document TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0)');
         await _alarms(db);
         await _leases(db);
+        await _localFiles(db);
       }, onUpgrade: (db, old, next) async {
         if (old < 2) await _alarms(db);
         if (old < 3) {
           await db.execute('ALTER TABLE workspaces ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
           await _leases(db);
         }
+        if (old < 4) await _localFiles(db);
       });
     return CloudStore(db, namespace);
   }
@@ -47,6 +49,10 @@ class CloudStore {
       'note_id TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL)');
     await db.execute('CREATE TABLE cloud_background_status (namespace TEXT PRIMARY KEY, message TEXT NOT NULL)');
   }
+
+  static Future<void> _localFiles(Database db) => db.execute(
+    'CREATE TABLE cloud_local_files (id TEXT PRIMARY KEY, namespace TEXT NOT NULL, '
+    'note_id TEXT NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL, size INTEGER NOT NULL)');
 
   Future<T> guarded<T>(Future<T> Function(Transaction txn) action) =>
       database.transaction((txn) async {

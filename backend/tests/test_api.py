@@ -29,7 +29,13 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv('DATABASE_URL', database_url)
     config = Config(str(Path(__file__).resolve().parents[1] / 'alembic.ini'))
     command.upgrade(config, 'head')
-    app = create_app(database_url)
+    class MemoryObjects:
+        def __init__(self): self.data = {}
+        def put(self, key, data, mime): self.data[key] = data
+        def get(self, key): return self.data[key]
+        def delete(self, key): self.data.pop(key, None)
+        def download_url(self, key): return 'https://objects.example.test/' + key + '?signed=1'
+    app = create_app(database_url, object_store=MemoryObjects())
     try:
         with TestClient(app) as test_client:
             yield test_client
@@ -41,11 +47,17 @@ def client(tmp_path, monkeypatch):
             admin.dispose()
 
 
-def account(client, email):
+def account(client, email, paid=True):
     response = client.post('/auth/register', json={
         'email': email, 'password': 'long-test-password-123', 'name': 'Тест',
     })
     assert response.status_code == 201, response.text
+    if paid:
+        from sqlalchemy.orm import Session
+        from app.main import CloudPlan
+        with Session(client.app.state.engine) as db:
+            db.add(CloudPlan(user_id=response.json()['user']['id'], tier='cloud'))
+            db.commit()
     return {'Authorization': 'Bearer ' + response.json()['access_token']}
 
 
@@ -437,3 +449,148 @@ def test_attachment_delete_is_idempotent_and_checks_scope(client):
     assert client.delete(path, headers=alice).status_code == 204
     assert client.get('/notes/' + nid, headers=alice).json()['version'] == 3
     assert client.get(path, headers=alice).status_code == 404
+
+
+def test_changes_are_incremental_compacted_and_include_deletions(client):
+    alice = account(client, 'a@example.com')
+    ids = [str(uuid.uuid4()) for _ in range(3)]
+    for nid in ids: put(client, alice, nid)
+    first = client.get('/sync/changes?limit=2', headers=alice).json()
+    assert len(first['notes']) == 2 and first['has_more'] is True
+    second = client.get('/sync/changes', params={'cursor': first['cursor'], 'limit': 2}, headers=alice).json()
+    assert len(second['notes']) == 1 and second['has_more'] is False
+    idle = client.get('/sync/changes', params={'cursor': second['cursor']}, headers=alice).json()
+    assert idle['notes'] == []
+    for version in range(1, 6): put(client, alice, ids[0], version, text=f'Правка {version}')
+    delta = client.get('/sync/changes', params={'cursor': idle['cursor']}, headers=alice).json()
+    assert len(delta['notes']) == 1
+    assert delta['notes'][0]['version'] == 6
+    client.request('DELETE', '/notes/' + ids[0], headers=alice, json={'expected_version': 6})
+    deleted = client.get('/sync/changes', params={'cursor': delta['cursor']}, headers=alice).json()
+    assert len(deleted['notes']) == 1 and deleted['notes'][0]['deleted'] is True
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+    from app.main import NoteChange
+    with Session(client.app.state.engine) as db:
+        assert db.scalar(select(func.count()).select_from(NoteChange)) == 3  # not 9 historical text copies
+
+
+def test_change_cursor_is_account_bound_and_resets_for_membership_changes(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    bid = client.get('/me', headers=bob).json()['id']
+    cursor = client.get('/sync/changes', headers=bob).json()['cursor']
+    assert client.get('/sync/changes', params={'cursor': cursor}, headers=alice).status_code == 422
+    assert client.get('/sync/changes', params={'cursor': cursor + 'tamper'}, headers=bob).status_code == 422
+    fid = client.post('/families', headers=alice, json={'name': 'Дом'}).json()['id']
+    nid = str(uuid.uuid4())
+    put(client, alice, nid, family_id=fid)
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    client.post('/families/join', headers=bob, json={'token': token})
+    reset = client.get('/sync/changes', params={'cursor': cursor}, headers=bob)
+    assert reset.status_code == 409 and reset.json()['detail']['code'] == 'sync_reset'
+    initial = client.get('/sync/changes', headers=bob).json()
+    assert initial['notes'][0]['id'] == nid
+    client.delete(f'/families/{fid}/members/{bid}', headers=alice)
+    assert client.get('/sync/changes', params={'cursor': initial['cursor']}, headers=bob).status_code == 409
+    assert client.get('/sync/changes', headers=bob).json()['notes'] == []
+
+
+def test_cloud_plan_is_server_owned_and_blob_is_not_stored_in_database(client):
+    from sqlalchemy.orm import Session
+    from app.main import Attachment
+    alice = account(client, 'free@example.com', paid=False)
+    nid, aid = str(uuid.uuid4()), str(uuid.uuid4())
+    put(client, alice, nid)
+    path = f'/notes/{nid}/attachments/{aid}'
+    response = client.put(path, headers={**alice, 'Content-Type': 'application/octet-stream'}, content=b'%PDF-1.7')
+    assert response.status_code == 402
+    usage = client.get('/cloud/usage', headers=alice).json()
+    assert usage['tier'] == 'free' and usage['quota_bytes'] == 0
+    assert client.post('/auth/register', json={'email': 'hack@example.com', 'password': 'long-password-test',
+        'name': 'Test', 'tier': 'cloud'}).status_code == 422
+    paid = account(client, 'paid@example.com')
+    nid2, aid2 = str(uuid.uuid4()), str(uuid.uuid4())
+    put(client, paid, nid2)
+    path2 = f'/notes/{nid2}/attachments/{aid2}'
+    assert client.put(path2, headers={**paid, 'Content-Type': 'application/octet-stream'}, content=b'%PDF-1.7').status_code == 200
+    with Session(client.app.state.engine) as db:
+        item = db.get(Attachment, aid2)
+        assert item.data is None and item.object_key is not None
+        assert client.app.state.objects.get(item.object_key) == b'%PDF-1.7'
+    grant = client.get(path2 + '/download-url', headers=paid).json()
+    assert grant['url'].startswith('https://objects.example.test/') and grant['expires_in'] == 60
+    stats = client.get('/cloud/usage', headers=paid).json()
+    assert stats['used_bytes'] == 8
+    assert stats['traffic']['uploaded_bytes'] == 8
+    assert stats['traffic']['download_granted_bytes'] == 8
+
+
+def test_paid_plan_expiry_blocks_only_new_cloud_bytes(client):
+    from datetime import timedelta
+    from sqlalchemy.orm import Session
+    from app.main import CloudPlan, now
+    alice = account(client, 'expire@example.com')
+    uid = client.get('/me', headers=alice).json()['id']
+    nid, aid = str(uuid.uuid4()), str(uuid.uuid4())
+    put(client, alice, nid)
+    path = f'/notes/{nid}/attachments/{aid}'
+    headers = {**alice, 'Content-Type': 'application/octet-stream'}
+    assert client.put(path, headers=headers, content=b'%PDF-1.7').status_code == 200
+    with Session(client.app.state.engine) as db:
+        db.get(CloudPlan, uid).expires = now() - timedelta(seconds=1)
+        db.commit()
+    assert client.get(path, headers=alice).status_code == 200  # no deletion on expiry
+    assert client.put(path, headers=headers, content=b'%PDF-1.7').status_code == 200  # retry not new storage
+    assert client.put(f'/notes/{nid}/attachments/{uuid.uuid4()}', headers=headers, content=b'%PDF-1.7').status_code == 402
+    assert client.get('/sync/changes', headers=alice).status_code == 200
+
+
+def test_failed_object_upload_does_not_commit_blob_or_feed_change(client):
+    alice = account(client, 'fail@example.com')
+    nid = str(uuid.uuid4())
+    put(client, alice, nid)
+    before = client.get('/sync/changes', headers=alice).json()['cursor']
+    objects = client.app.state.objects
+    original_put = objects.put
+    def fail(*args): raise OSError('object service offline')
+    objects.put = fail
+    response = client.put(f'/notes/{nid}/attachments/{uuid.uuid4()}', headers={**alice,
+        'Content-Type': 'application/octet-stream'}, content=b'%PDF-1.7')
+    objects.put = original_put
+    assert response.status_code == 503
+    assert client.get('/notes/' + nid, headers=alice).json()['attachments'] == []
+    assert client.get('/sync/changes', params={'cursor': before}, headers=alice).json()['notes'] == []
+
+
+def test_receipts_do_not_duplicate_historical_note_text(client):
+    from sqlalchemy.orm import Session
+    from app.main import MutationReceipt
+    alice = account(client, 'compact@example.com')
+    uid = client.get('/me', headers=alice).json()['id']
+    nid, operation = str(uuid.uuid4()), str(uuid.uuid4())
+    headers = {**alice, 'Idempotency-Key': operation}
+    body = {'text': 'Private historical text should not be copied into receipt', 'expected_version': 0}
+    first = client.put('/notes/' + nid, headers=headers, json=body)
+    with Session(client.app.state.engine) as db:
+        assert 'text' not in db.get(MutationReceipt, (uid, operation)).result
+    assert client.put('/notes/' + nid, headers=headers, json=body).json() == first.json()
+
+
+def test_updates_during_delta_paging_move_forward_not_behind_cursor(client):
+    alice = account(client, 'paging@example.com')
+    ids = [str(uuid.uuid4()) for _ in range(3)]
+    for nid in ids: put(client, alice, nid)
+    first = client.get('/sync/changes?limit=1', headers=alice).json()
+    assert first['notes'][0]['id'] == ids[0]
+    # A not-yet-delivered row moves to the end; an already delivered row changes again.
+    put(client, alice, ids[1], 1, text='Moved forward')
+    put(client, alice, ids[0], 1, text='Delivered again')
+    found = {first['notes'][0]['id']: first['notes'][0]['version']}
+    cursor = first['cursor']
+    while True:
+        page = client.get('/sync/changes', headers=alice, params={'cursor': cursor, 'limit': 1}).json()
+        for row in page['notes']: found[row['id']] = row['version']
+        cursor = page['cursor']
+        if not page['has_more']: break
+    assert found == {ids[0]: 2, ids[1]: 2, ids[2]: 1}

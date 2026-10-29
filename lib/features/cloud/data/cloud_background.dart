@@ -33,13 +33,19 @@ void cloudBackgroundDispatcher() {
             current?.namespace != session.namespace || current?.token != session.token) return;
         api = CloudApi(session.origin, token: session.token);
         final workspace = CloudWorkspace(api!, await store.read(), store.write);
-        await workspace.sync();
-        await CloudFiles(store, api!).uploadPending(workspace);
-        await workspace.sync();
-        final notifications = LocalNotificationService();
-        // Never launch permission prompts from a background isolate.
-        await notifications.initBackground();
-        await CloudAlarms(store.database, notifications, session.namespace).reconcile(workspace.notes);
+        try {
+          await workspace.sync();
+          final files = CloudFiles(store, api!);
+          if ((await files.pending()).isNotEmpty) {
+            await files.uploadPending(workspace);
+            await workspace.sync();
+          }
+        } finally {
+          // Partial file failure must not suppress alarms from already committed notes.
+          final notifications = LocalNotificationService();
+          await notifications.initBackground();
+          await CloudAlarms(store.database, notifications, session.namespace).reconcile(workspace.notes);
+        }
         await store.guarded((txn) => txn.insert('cloud_background_status', {
           'namespace': session.namespace,
           'message': jsonEncode({'at': DateTime.now().toUtc().toIso8601String(), 'ok': true}),

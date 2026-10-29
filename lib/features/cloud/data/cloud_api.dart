@@ -6,7 +6,8 @@ import 'package:http/http.dart' as http;
 class CloudApiException implements Exception {
   final int status;
   final String message;
-  CloudApiException(this.status, this.message);
+  final String? code;
+  CloudApiException(this.status, this.message, {this.code});
   @override
   String toString() => message;
 }
@@ -44,6 +45,7 @@ class CloudApi {
         .timeout(const Duration(seconds: 20))).timeout(const Duration(seconds: 20));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final message = switch (response.statusCode) {
+        402 => 'Облачная копия файлов требует активного облачного тарифа. Локальные файлы остаются бесплатными.',
         401 => 'Сессия истекла. Выйдите и войдите снова. Очередь сохранена.',
         403 => 'Недостаточно прав. Приглашения может создавать только владелец семьи.',
         404 => 'Запись не найдена или доступ отозван.',
@@ -56,7 +58,12 @@ class CloudApi {
         422 => 'Сервер отклонил данные. Проверьте заполненные поля.',
         _ => 'Сервер недоступен (${response.statusCode}). Очередь сохранена.',
       };
-      throw CloudApiException(response.statusCode, message);
+      String? code;
+      try {
+        final payload = jsonDecode(utf8.decode(response.bodyBytes));
+        if (payload['detail'] is Map) code = payload['detail']['code'] as String?;
+      } catch (_) { /* Do not expose arbitrary server responses or secrets. */ }
+      throw CloudApiException(response.statusCode, message, code: code);
     }
     return response.body.isEmpty ? null : jsonDecode(utf8.decode(response.bodyBytes));
   }
@@ -72,14 +79,37 @@ class CloudApi {
     final response = await client.send(request).timeout(const Duration(seconds: 30));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       await response.stream.drain<void>().timeout(const Duration(seconds: 30));
-      throw CloudApiException(response.statusCode,
-        'Вложение не передано (${response.statusCode}). Проверьте доступ, тип файла и квоту.');
+      throw CloudApiException(response.statusCode, response.statusCode == 402
+        ? 'Облачный тариф не активен. Вложение осталось в очереди; текстовые заметки сохранены.'
+        : 'Вложение не передано (${response.statusCode}). Проверьте доступ, тип файла и квоту.');
     }
     final data = BytesBuilder(copy: false);
     await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
       if (data.length + chunk.length > 5 * 1024 * 1024) {
         throw StateError('Ответ сервера превышает лимит вложения.');
       }
+      data.add(chunk);
+    }
+    return data.takeBytes();
+  }
+
+  Future<Uint8List> downloadObject(String address) async {
+    final uri = Uri.parse(address);
+    const allowHttp = bool.fromEnvironment('ALLOW_INSECURE_BACKEND');
+    if ((!uri.isScheme('https') && !(allowHttp && uri.isScheme('http'))) ||
+        uri.host.isEmpty || uri.userInfo.isNotEmpty) {
+      throw StateError('Сервер вернул небезопасный адрес объекта.');
+    }
+    // A short-lived S3 signature authorizes this request. NEVER send our bearer token.
+    final request = http.Request('GET', uri)..followRedirects = false;
+    final response = await client.send(request).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      await response.stream.drain<void>().timeout(const Duration(seconds: 30));
+      throw StateError('Ссылка на файл устарела или хранилище недоступно. Повторите открытие.');
+    }
+    final data = BytesBuilder(copy: false);
+    await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
+      if (data.length + chunk.length > 5 * 1024 * 1024) throw StateError('Файл превышает лимит.');
       data.add(chunk);
     }
     return data.takeBytes();

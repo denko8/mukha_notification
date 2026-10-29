@@ -17,7 +17,7 @@ def test_upgrade_retains_data_and_downgrade_is_reversible(tmp_path, monkeypatch)
     command.upgrade(cfg, 'head')  # repeated deployment is safe
     with engine.connect() as db:
         assert db.scalar(text('SELECT name FROM users')) == 'Тест'
-        assert db.scalar(text('SELECT version_num FROM alembic_version')) == '0004'
+        assert db.scalar(text('SELECT version_num FROM alembic_version')) == '0005'
     command.downgrade(cfg, '0001')
     with engine.connect() as db:
         assert db.scalar(text('SELECT name FROM users')) == 'Тест'

@@ -39,6 +39,8 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   CloudStore? _store;
   bool _background = false;
   List<Map<String, Object?>> _uploads = [];
+  List<Map<String, Object?>> _localFiles = [];
+  Map<String, dynamic>? _usage;
   String? _backgroundStatus;
   Timer? _timer;
   bool _auto = false;
@@ -70,8 +72,12 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   Future<void> _sync() async {
     try {
       await _workspace!.sync();
-      await CloudFiles(_store!, _workspace!.api).uploadPending(_workspace!);
-      await _workspace!.sync();
+      final files = CloudFiles(_store!, _workspace!.api);
+      if ((await files.pending()).isNotEmpty) {
+        await files.uploadPending(_workspace!);
+        await _workspace!.sync();
+      }
+      _usage = Map<String, dynamic>.from(await _workspace!.api.request('GET', '/cloud/usage') as Map);
       final families = await _workspace!.api.request('GET', '/families') as List;
       _families = families.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       if (!_families.any((f) => f['id'] == _familyId)) _familyId = null;
@@ -103,6 +109,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
     Future<void> reconcile() async {
       if (_workspace == null || _alarms == null || _store == null) return;
       _uploads = await CloudFiles(_store!, _workspace!.api).pending();
+      _localFiles = await CloudFiles(_store!, _workspace!.api).localFiles();
       final statuses = await _store!.database.query('cloud_background_status',
         where: 'namespace = ?', whereArgs: [_store!.namespace]);
       _backgroundStatus = statuses.isEmpty ? null : statuses.single['message'] as String;
@@ -118,7 +125,13 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
       if (activeStore != null && _workspace != null) {
         await activeStore.withLease(() async {
           _workspace!.state = await activeStore.read();
-          await action();
+          try {
+            await action();
+          } catch (_) {
+            // An upload failure must not prevent alarms for already saved/synced notes.
+            try { await reconcile(); } catch (_) {}
+            rethrow;
+          }
           await reconcile();
         });
       } else {
@@ -197,7 +210,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
       _families = [];
       _familyId = null;
       _workspace!.api.close();
-      if (mounted) setState(() { _session = null; _workspace = null; _store = null; _alarms = null; _uploads = []; _draft = ''; });
+      if (mounted) setState(() { _session = null; _workspace = null; _store = null; _alarms = null; _uploads = []; _localFiles = []; _usage = null; _draft = ''; });
     });
   }
 
@@ -333,6 +346,11 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
             }),
           ),
           if (_backgroundStatus != null) Text('Последний фоновый запуск: $_backgroundStatus'),
+          if (_usage != null) Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(
+            'Облачные файлы: ${_usage!['tier'] == 'cloud' ? 'Облачный тариф' : 'Бесплатный — только локальные файлы'}\n'
+            'Использовано ${_mib(_usage!['used_bytes'])} из ${_mib(_usage!['quota_bytes'])} МиБ\n'
+            'Файл до 5 МиБ · заметка до 20 МиБ / 10 файлов. '
+            'Увеличенная квота активируется на сервере; покупка в приложении пока не подключена.'))),
           if (_lastSync != null) Text('Последний обмен: ${_lastSync!.toLocal()}'),
           Wrap(spacing: 8, children: [
             TextButton(onPressed: _busy ? null : () => _familyAction('create'), child: const Text('Создать семью')),
@@ -362,6 +380,17 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
             trailing: IconButton(tooltip: 'Убрать вложение из очереди', icon: const Icon(Icons.close),
               onPressed: _busy ? null : () => _run(() =>
                 CloudFiles(_store!, workspace.api).discard(upload['id'] as String))),
+          ),
+          if (_localFiles.isNotEmpty) const Text('Файлы только на этом устройстве — без облачного восстановления'),
+          for (final local in _localFiles) ListTile(
+            leading: const Icon(Icons.phone_android), title: Text(local['name'] as String),
+            subtitle: Text('${_mib(local['size'])} МиБ · не загружается в облако'),
+            onTap: _busy ? null : () => _run(() async {
+              final result = await OpenFilex.open(local['path'] as String);
+              if (result.type != ResultType.done) throw StateError('Локальный файл недоступен.');
+            }),
+            trailing: IconButton(tooltip: 'Удалить локальную копию', icon: const Icon(Icons.delete_outline),
+              onPressed: _busy ? null : () => _removeLocal(local)),
           ),
           for (final id in workspace.notes.keys)
             if (workspace.notes[id]['note']['deleted'] != true ||
@@ -490,17 +519,43 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
         setState(() => _message = 'Файл недоступен. Выберите другой файл.');
         return;
       }
+      final mode = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Где хранить вложение?'),
+        content: const Text('Только на устройстве — бесплатно, не передаётся семье и не восстановится из облака. '
+          'Облачная копия — занимает платную квоту, доступна другим вашим устройствам и участникам этой семьи.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Только на устройстве')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Облачная копия · тариф')),
+        ],
+      ));
+      if (mode == null || !mounted) return;
       await _run(() async {
         final entry = _workspace!.notes[id] as Map?;
         if (entry == null || entry['blocked'] != null || entry['operation'] != null ||
             entry['note']['deleted'] == true) {
           throw StateError('Сначала синхронизируйте заметку.');
         }
-        await CloudFiles(_store!, _workspace!.api).enqueue(id, File(item.path!), item.name);
+        await CloudFiles(_store!, _workspace!.api).enqueue(id, File(item.path!), item.name, cloudCopy: mode);
       });
     } catch (error) {
       if (mounted) setState(() => _message = 'Не удалось выбрать вложение. Попробуйте другой файл.');
     } finally { _editing = false; }
+  }
+
+  String _mib(dynamic bytes) => ((bytes as num) / (1024 * 1024)).toStringAsFixed(2);
+
+  Future<void> _removeLocal(Map<String, Object?> local) async {
+    final yes = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Удалить файл с устройства?'),
+      content: const Text('Облачной копии этого файла нет. Это действие нельзя отменить.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
+      ],
+    ));
+    if (yes == true && mounted) await _run(() =>
+      CloudFiles(_store!, _workspace!.api).deleteLocal(local['id'] as String));
   }
 
   Future<void> _editAsNew(String text) async {

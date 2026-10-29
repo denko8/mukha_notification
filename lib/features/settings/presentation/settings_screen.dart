@@ -188,13 +188,9 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 8),
           ElevatedButton.icon(
-            icon: Icon(settings.proEnabled ? Icons.verified : Icons.workspace_premium),
-            label: Text(settings.proEnabled
-                ? 'PRO активна'
-                : 'Попробовать PRO (5 дней бесплатно)'),
-            onPressed: settings.proEnabled
-                ? null
-                : () => Navigator.of(context).push(
+            icon: const Icon(Icons.workspace_premium),
+            label: const Text('Облачная копия и тарифы'),
+            onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const PaywallScreen())),
           ),
         ],
