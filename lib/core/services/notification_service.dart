@@ -96,6 +96,17 @@ class LocalNotificationService implements NotificationService {
     _ready = true;
   }
 
+  /// Worker isolate: initialization only, never permission dialogs.
+  Future<void> initBackground() async {
+    if (_ready) return;
+    tz_data.initializeTimeZones();
+    final name = await FlutterTimezone.getLocalTimezone();
+    tz.setLocalLocation(tz.getLocation(name));
+    await _plugin.initialize(const InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher')));
+    _ready = true;
+  }
+
   @override
   Future<void> schedule({
     required int id,

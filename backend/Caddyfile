@@ -3,7 +3,7 @@
 }
 {$API_DOMAIN} {
     request_body {
-        max_size 128KB
+        max_size 6MB
     }
     header {
         Strict-Transport-Security "max-age=31536000"

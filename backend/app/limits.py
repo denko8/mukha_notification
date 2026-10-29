@@ -1,5 +1,6 @@
 """Single-worker safety limits. Not a substitute for a distributed edge limiter."""
 import asyncio
+import re
 import time
 from collections import OrderedDict
 
@@ -37,6 +38,9 @@ class RequestLimits:
         limit = self.auth_limit if auth else self.general_limit
         if count > limit:
             return await JSONResponse({'detail': 'Too many requests'}, 429, headers={'Retry-After': '60'})(scope, receive, send)
+        upload = scope['method'] == 'PUT' and re.fullmatch(
+            r'/notes/[0-9a-fA-F-]{36}/attachments/[0-9a-fA-F-]{36}', scope['path'])
+        body_limit = 5 * 1024 * 1024 if upload else self.max_body
         chunks = []
         size = 0
         # Buffer only up to a strict bound before the endpoint parses JSON.
@@ -49,7 +53,7 @@ class RequestLimits:
                         return
                     body = message.get('body', b'')
                     size += len(body)
-                    if size > self.max_body:
+                    if size > body_limit:
                         return await JSONResponse({'detail': 'Request body too large'}, 413)(scope, receive, send)
                     chunks.append(body)
                     if not message.get('more_body', False):

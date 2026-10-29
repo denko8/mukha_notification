@@ -29,6 +29,11 @@ class CloudSession {
       token: data['token'] as String);
   }
 
+  static Future<bool> backgroundEnabled() async =>
+      await _storage.read(key: 'cloud_background_enabled') == 'true';
+  static Future<void> setBackgroundEnabled(bool enabled) =>
+      _storage.write(key: 'cloud_background_enabled', value: enabled.toString());
+
   static Future<void> forget() => _storage.delete(key: _key);
 
   static Future<CloudSession> signIn(String address, String email,

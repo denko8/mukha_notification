@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
+import 'package:open_filex/open_filex.dart';
+import '../data/cloud_files.dart';
+import '../data/cloud_background.dart';
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -31,6 +36,10 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   String? _message;
   String _draft = '';
   CloudAlarms? _alarms;
+  CloudStore? _store;
+  bool _background = false;
+  List<Map<String, Object?>> _uploads = [];
+  String? _backgroundStatus;
   Timer? _timer;
   bool _auto = false;
   bool _editing = false;
@@ -61,6 +70,8 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   Future<void> _sync() async {
     try {
       await _workspace!.sync();
+      await CloudFiles(_store!, _workspace!.api).uploadPending(_workspace!);
+      await _workspace!.sync();
       final families = await _workspace!.api.request('GET', '/families') as List;
       _families = families.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       if (!_families.any((f) => f['id'] == _familyId)) _familyId = null;
@@ -89,14 +100,35 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
     setState(() { _busy = true; _message = null; });
+    Future<void> reconcile() async {
+      if (_workspace == null || _alarms == null || _store == null) return;
+      _uploads = await CloudFiles(_store!, _workspace!.api).pending();
+      final statuses = await _store!.database.query('cloud_background_status',
+        where: 'namespace = ?', whereArgs: [_store!.namespace]);
+      _backgroundStatus = statuses.isEmpty ? null : statuses.single['message'] as String;
+      try {
+        await _alarms!.reconcile(_workspace!.notes);
+      } catch (_) {
+        throw StateError('Данные сохранены, но обновить локальные напоминания не удалось. '
+          'Проверьте разрешения уведомлений и точных будильников Android.');
+      }
+    }
     try {
-      await action();
-      if (_workspace != null && _alarms != null) {
-        try {
-          await _alarms!.reconcile(_workspace!.notes);
-        } catch (error) {
-          throw StateError('Данные сохранены, но обновить локальные напоминания не удалось. '
-            'Проверьте разрешения уведомлений и точных будильников Android.');
+      final activeStore = _store;
+      if (activeStore != null && _workspace != null) {
+        await activeStore.withLease(() async {
+          _workspace!.state = await activeStore.read();
+          await action();
+          await reconcile();
+        });
+      } else {
+        await action();
+        final opened = _store;
+        if (opened != null && _workspace != null) {
+          await opened.withLease(() async {
+            _workspace!.state = await opened.read();
+            await reconcile();
+          });
         }
       }
     } catch (error) {
@@ -116,10 +148,13 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   Future<void> _open(CloudSession session) async {
     final store = await CloudStore.open(session.namespace);
     final state = await store.read();
+    final background = await CloudSession.backgroundEnabled();
     final api = CloudApi(session.origin, token: session.token);
     if (!mounted) { api.close(); return; }
     _workspace?.api.close();
     setState(() {
+      _store = store;
+      _background = background;
       _alarms = CloudAlarms(store.database, ref.read(notificationServiceProvider), session.namespace);
       _session = session;
       _workspace = CloudWorkspace(api, state, store.write);
@@ -154,13 +189,15 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
     await _run(() async {
       try { await _workspace!.api.request('POST', '/auth/logout'); } catch (_) {}
       await _alarms?.cancel();
+      await CloudBackground.disable();
+      _background = false;
       await CloudSession.forget();
       _timer?.cancel();
       _auto = false;
       _families = [];
       _familyId = null;
       _workspace!.api.close();
-      if (mounted) setState(() { _session = null; _workspace = null; _draft = ''; });
+      if (mounted) setState(() { _session = null; _workspace = null; _store = null; _alarms = null; _uploads = []; _draft = ''; });
     });
   }
 
@@ -197,8 +234,15 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   }
 
   Future<void> _edit(String id, String text) async {
+    final version = _workspace!.notes[id]['note']['version'];
     final result = await _textDialog(text);
-    if (result != null && mounted) await _run(() => _workspace!.edit(id, result));
+    if (result != null && mounted) await _run(() async {
+      if (_workspace!.notes[id]?['note']['version'] != version) {
+        _draft = result;
+        throw StateError('Заметка изменилась в фоне. Ваш текст оставлен в черновике новой заметки.');
+      }
+      await _workspace!.edit(id, result);
+    });
   }
 
   Future<void> _delete(String id, String text) async {
@@ -238,7 +282,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
       body: ListView(padding: const EdgeInsets.all(16), children: [
         const Text('Отдельное облачное пространство. Заметки из основной ленты сюда '
           'не переносятся. Семейные заметки можно изменять. '
-          'Напоминания локальные: обновляются после получения изменений. Вложения ещё не подключены.'),
+          'Напоминания локальные. Вложения: PDF и изображения до 5 МиБ. '),
         const SizedBox(height: 16),
         if (_busy) const LinearProgressIndicator(),
         if (_message != null) Padding(padding: const EdgeInsets.symmetric(vertical: 12),
@@ -276,6 +320,19 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
               if (v) { _scheduleAuto(immediate: true); } else { _timer?.cancel(); }
             },
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Фоновый обмен Android'),
+            subtitle: const Text('WorkManager, от 15 минут при наличии сети. '
+              'Android может откладывать запуск; Force stop блокирует работу до открытия приложения.'),
+            value: _background,
+            onChanged: _busy ? null : (enabled) => _run(() async {
+              if (enabled) { await CloudBackground.enable(); }
+              else { await CloudBackground.disable(); }
+              _background = enabled;
+            }),
+          ),
+          if (_backgroundStatus != null) Text('Последний фоновый запуск: $_backgroundStatus'),
           if (_lastSync != null) Text('Последний обмен: ${_lastSync!.toLocal()}'),
           Wrap(spacing: 8, children: [
             TextButton(onPressed: _busy ? null : () => _familyAction('create'), child: const Text('Создать семью')),
@@ -298,6 +355,14 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
             'Для отправки нажмите «Синхронизировать» или включите автообмен. Первый вход требует интернет.'),
           if (workspace.notes.isEmpty) const Padding(padding: EdgeInsets.all(24),
             child: Text('Кэш пока пуст. Загрузите заметки с сервера или создайте первую.')),
+          for (final upload in _uploads) ListTile(
+            leading: const Icon(Icons.upload_file),
+            title: Text(upload['name'] as String),
+            subtitle: const Text('В очереди загрузки'),
+            trailing: IconButton(tooltip: 'Убрать вложение из очереди', icon: const Icon(Icons.close),
+              onPressed: _busy ? null : () => _run(() =>
+                CloudFiles(_store!, workspace.api).discard(upload['id'] as String))),
+          ),
           for (final id in workspace.notes.keys)
             if (workspace.notes[id]['note']['deleted'] != true ||
                 workspace.notes[id]['operation'] != null)
@@ -324,6 +389,14 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
         Text(note['text'] as String? ?? 'Удалено на сервере'),
         Text(blocked ? 'Локальный черновик · не отправляется' : remote != null ? 'Конфликт — требуется ваш выбор'
           : pending ? (deleted ? 'Удаление в очереди' : 'Ожидает отправки') : 'Подтверждено сервером'),
+        for (final attachment in (note['attachments'] as List? ?? []))
+          TextButton.icon(icon: const Icon(Icons.attach_file),
+            label: Text('${attachment['name']} · ${attachment['size']} байт'),
+            onPressed: _busy ? null : () => _run(() async {
+              final file = await CloudFiles(_store!, _workspace!.api).download(id, attachment as Map);
+              final result = await OpenFilex.open(file.path);
+              if (result.type != ResultType.done) throw StateError('Не удалось открыть файл: ${result.message}');
+            })),
         if (remote != null) ...[
           const Divider(),
           Text('На сервере: ${remote['deleted'] == true ? 'удалено' : remote['text']}'),
@@ -340,6 +413,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
         ],
         if (!pending && !deleted && !blocked) Wrap(children: [
           TextButton(onPressed: _busy ? null : () => _edit(id, note['text'] as String), child: const Text('Изменить')),
+          TextButton(onPressed: _busy ? null : () => _attach(id), child: const Text('Прикрепить файл')),
           TextButton(onPressed: _busy ? null : () => _reminder(id), child: const Text('Напоминание')),
           if (note['reminder_at'] != null) TextButton(onPressed: _busy ? null :
             () => _run(() => _workspace!.setReminder(id, null)), child: const Text('Убрать напоминание')),
@@ -350,6 +424,7 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
   }
 
   Future<void> _reminder(String id) async {
+    final version = _workspace!.notes[id]['note']['version'];
     _editing = true;
     try {
     final now = DateTime.now();
@@ -363,7 +438,12 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
       setState(() => _message = 'Выберите время в будущем.');
       return;
     }
-    await _run(() => _workspace!.setReminder(id, when));
+    await _run(() async {
+      if (_workspace!.notes[id]?['note']['version'] != version) {
+        throw StateError('Заметка обновилась в фоне. Выберите напоминание заново.');
+      }
+      await _workspace!.setReminder(id, when);
+    });
     } finally { _editing = false; }
   }
 
@@ -397,6 +477,30 @@ class _CloudScreenState extends ConsumerState<CloudScreen> with WidgetsBindingOb
       }
       await _sync();
     });
+  }
+
+  Future<void> _attach(String id) async {
+    _editing = true;
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp']);
+      if (result == null || !mounted) return;
+      final item = result.files.single;
+      if (item.path == null) {
+        setState(() => _message = 'Файл недоступен. Выберите другой файл.');
+        return;
+      }
+      await _run(() async {
+        final entry = _workspace!.notes[id] as Map?;
+        if (entry == null || entry['blocked'] != null || entry['operation'] != null ||
+            entry['note']['deleted'] == true) {
+          throw StateError('Сначала синхронизируйте заметку.');
+        }
+        await CloudFiles(_store!, _workspace!.api).enqueue(id, File(item.path!), item.name);
+      });
+    } catch (error) {
+      if (mounted) setState(() => _message = 'Не удалось выбрать вложение. Попробуйте другой файл.');
+    } finally { _editing = false; }
   }
 
   Future<void> _editAsNew(String text) async {

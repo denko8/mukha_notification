@@ -363,3 +363,77 @@ def test_receipts_and_snapshots_survive_api_restart(client):
             assert second.get('/sync/snapshots/' + sid, headers=alice).json()['notes'] == [result]
     finally:
         restarted.state.engine.dispose()
+
+
+def test_attachment_upload_retry_download_and_note_delete(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    nid, aid = str(uuid.uuid4()), str(uuid.uuid4())
+    put(client, alice, nid)
+    path = f'/notes/{nid}/attachments/{aid}'
+    headers = {**alice, 'Content-Type': 'application/octet-stream', 'X-Filename': 'test.pdf'}
+    data = b'%PDF-1.7\n test object'
+    first = client.put(path, headers=headers, content=data)
+    assert first.status_code == 200, first.text
+    assert client.put(path, headers=headers, content=data).json() == first.json()
+    note = client.get('/notes/' + nid, headers=alice).json()
+    assert note['version'] == 2  # retry did not increment again
+    assert note['attachments'][0]['id'] == aid
+    assert client.get(path, headers=alice).content == data
+    assert client.get(path, headers=bob).status_code == 404
+    assert client.put(path, headers={**headers, **bob}, content=data).status_code == 404
+    assert client.put(path, headers=headers, content=b'%PDF-1.7\n other').status_code == 409
+    assert client.request('DELETE', '/notes/' + nid, headers=alice, json={'expected_version': 2}).status_code == 200
+    assert client.get(path, headers=alice).status_code == 404
+    from sqlalchemy import select, func
+    from sqlalchemy.orm import Session
+    from app.main import Attachment
+    with Session(client.app.state.engine) as db:
+        assert db.scalar(select(func.count()).select_from(Attachment)) == 0
+
+
+def test_attachment_family_revocation(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    bid = client.get('/me', headers=bob).json()['id']
+    fid = client.post('/families', headers=alice, json={'name': 'Дом'}).json()['id']
+    token = client.post(f'/families/{fid}/invites', headers=alice).json()['token']
+    client.post('/families/join', headers=bob, json={'token': token})
+    nid, aid = str(uuid.uuid4()), str(uuid.uuid4())
+    put(client, alice, nid, family_id=fid)
+    path = f'/notes/{nid}/attachments/{aid}'
+    data = b'\x89PNG\r\n\x1a\n test'
+    assert client.put(path, headers={**bob, 'Content-Type': 'application/octet-stream'}, content=data).status_code == 200
+    assert client.get(path, headers=alice).content == data
+    client.delete(f'/families/{fid}/members/{bid}', headers=alice)
+    assert client.get(path, headers=bob).status_code == 404
+    assert client.put(path, headers={**bob, 'Content-Type': 'application/octet-stream'}, content=data).status_code == 404
+
+
+def test_attachment_type_size_and_count_limits(client):
+    alice = account(client, 'a@example.com')
+    nid = str(uuid.uuid4())
+    put(client, alice, nid)
+    headers = {**alice, 'Content-Type': 'application/octet-stream'}
+    path = f'/notes/{nid}/attachments/'
+    assert client.put(path + str(uuid.uuid4()), headers=headers, content=b'MZ executable').status_code == 415
+    assert client.put(path + str(uuid.uuid4()), headers=headers, content=b'%PDF-' + b'x' * (5 * 1024 * 1024)).status_code == 413
+    for _ in range(10):
+        assert client.put(path + str(uuid.uuid4()), headers=headers, content=b'%PDF-1.7').status_code == 200
+    assert client.put(path + str(uuid.uuid4()), headers=headers, content=b'%PDF-1.7').status_code == 413
+    # JSON endpoints retain the much smaller body limit.
+    assert client.put('/notes/' + nid, headers=alice, content=b'x' * 131073).status_code == 413
+
+
+def test_attachment_delete_is_idempotent_and_checks_scope(client):
+    alice = account(client, 'a@example.com')
+    bob = account(client, 'b@example.com')
+    nid, aid = str(uuid.uuid4()), str(uuid.uuid4())
+    put(client, alice, nid)
+    path = f'/notes/{nid}/attachments/{aid}'
+    client.put(path, headers={**alice, 'Content-Type': 'application/octet-stream'}, content=b'%PDF-1.7')
+    assert client.delete(path, headers=bob).status_code == 404
+    assert client.delete(path, headers=alice).status_code == 204
+    assert client.delete(path, headers=alice).status_code == 204
+    assert client.get('/notes/' + nid, headers=alice).json()['version'] == 3
+    assert client.get(path, headers=alice).status_code == 404

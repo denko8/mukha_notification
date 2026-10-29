@@ -7,11 +7,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, update
+from sqlalchemy import JSON, LargeBinary, DateTime, ForeignKey, Integer, String, create_engine, delete, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from .limits import RequestLimits
 
@@ -91,6 +91,18 @@ class SyncSnapshot(Base):
     expires: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     family_ids: Mapped[list] = mapped_column(JSON)
     notes: Mapped[list] = mapped_column(JSON)
+
+
+class Attachment(Base):
+    __tablename__ = 'attachments'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    note_id: Mapped[str] = mapped_column(ForeignKey('notes.id'), index=True)
+    uploader_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    mime: Mapped[str] = mapped_column(String(80))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
 
 
 class Input(BaseModel):
@@ -175,10 +187,18 @@ def create_app(database_url: str | None = None):
         elif note.owner_id != user.id:
             raise HTTPException(404, 'Note not found')
 
-    def public_note(note):
+    def attachment_info(item):
+        return dict(id=item.id, name=item.name, mime=item.mime,
+                    size=item.size, sha256=item.sha256)
+
+    def public_note(note, db):
         return dict(id=note.id, author_id=note.owner_id, family_id=note.family_id,
                     version=note.version, deleted=bool(note.deleted),
-                    updated_at=aware(note.updated_at).isoformat(), **note.payload)
+                    updated_at=aware(note.updated_at).isoformat(),
+                    attachments=[] if note.deleted else [attachment_info(a) for a in
+                        db.execute(select(Attachment.id, Attachment.name, Attachment.mime, Attachment.size, Attachment.sha256)
+                            .where(Attachment.note_id == note.id).order_by(Attachment.id))],
+                    **note.payload)
 
     def issue_session(db, user):
         token = secrets.token_urlsafe(32)
@@ -316,7 +336,7 @@ def create_app(database_url: str | None = None):
         family_ids = select(Member.family_id).where(Member.user_id == user.id)
         accessible = ((Note.owner_id == user.id) & Note.family_id.is_(None)) | Note.family_id.in_(family_ids)
         # Tombstones are included, so an offline device can apply deletions.
-        return [public_note(n) for n in db.scalars(select(Note).where(accessible)
+        return [public_note(n, db) for n in db.scalars(select(Note).where(accessible)
                 .order_by(Note.id).offset(offset).limit(limit))]
 
     def begin_mutation(db, user, key, method, note_id, data):
@@ -339,7 +359,7 @@ def create_app(database_url: str | None = None):
         return fingerprint, None
 
     def finish_mutation(db, user, key, fingerprint, note):
-        result = public_note(note)
+        result = public_note(note, db)
         if key is not None:
             db.add(MutationReceipt(user_id=user.id, operation_id=str(key),
                 request_hash=fingerprint, note_id=note.id, result=result))
@@ -347,11 +367,97 @@ def create_app(database_url: str | None = None):
         db.commit()
         return result
 
+    @app.put('/notes/{note_id}/attachments/{attachment_id}')
+    def upload_attachment(note_id: uuid.UUID, attachment_id: uuid.UUID,
+                                raw: Annotated[bytes, Body(media_type="application/octet-stream")], db: DB, user: Current,
+                                x_filename: Annotated[str, Header()] = 'file'):
+        from sqlalchemy.exc import IntegrityError
+        # Raw binary, deliberately no multipart parser. Strict request limit in ASGI.
+        if not 0 < len(raw) <= 5 * 1024 * 1024:
+            raise HTTPException(413, 'Attachment must be between 1 byte and 5 MiB')
+        if raw.startswith(b'%PDF-'):
+            mime = 'application/pdf'
+        elif raw.startswith(b'\x89PNG\r\n\x1a\n'):
+            mime = 'image/png'
+        elif raw.startswith(b'\xff\xd8\xff'):
+            mime = 'image/jpeg'
+        elif len(raw) >= 12 and raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+            mime = 'image/webp'
+        else:
+            raise HTTPException(415, 'Only PDF, JPEG, PNG and WebP are supported')
+        # Serialize per-uploader quotas; lock family consistently with note writes.
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        note = db.get(Note, str(note_id))
+        if note is not None and note.family_id:
+            lock_family(db, note.family_id)
+        if note is not None:
+            db.refresh(note)  # another family member may have deleted it while we waited
+        note_access(db, note, user)
+        if note.deleted:
+            raise HTTPException(409, 'Cannot attach to a deleted note')
+        checksum = hashlib.sha256(raw).hexdigest()
+        # Names are percent-encoded UTF-8 by the client; never used as filesystem paths.
+        from urllib.parse import unquote
+        name = unquote(x_filename).replace('\\', '/').split('/')[-1]
+        name = ''.join(c for c in name if c.isprintable())[:120] or 'file'
+        existing = db.get(Attachment, str(attachment_id))
+        if existing is not None:
+            if existing.note_id != str(note_id) or existing.uploader_id != user.id:
+                raise HTTPException(409, 'Attachment ID is already used')
+            if existing.sha256 != checksum or existing.name != name:
+                raise HTTPException(409, 'Attachment ID reused for different content')
+            return attachment_info(existing)
+        total = db.scalar(select(func.coalesce(func.sum(Attachment.size), 0)).where(Attachment.uploader_id == user.id))
+        note_size = db.scalar(select(func.coalesce(func.sum(Attachment.size), 0)).where(Attachment.note_id == str(note_id)))
+        count = db.scalar(select(func.count()).select_from(Attachment).where(Attachment.note_id == str(note_id)))
+        if total + len(raw) > 100 * 1024 * 1024 or note_size + len(raw) > 20 * 1024 * 1024 or count >= 10:
+            raise HTTPException(413, 'Attachment storage quota reached')
+        item = Attachment(id=str(attachment_id), note_id=str(note_id), uploader_id=user.id,
+                          name=name, mime=mime, size=len(raw), sha256=checksum, data=raw)
+        db.add(item)
+        try:
+            db.execute(update(Note).where(Note.id == note.id).values(version=Note.version + 1, updated_at=now()))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, 'Concurrent attachment ID collision')
+        return attachment_info(item)
+
+    @app.get('/notes/{note_id}/attachments/{attachment_id}')
+    def download_attachment(note_id: uuid.UUID, attachment_id: uuid.UUID, db: DB, user: Current):
+        note = db.get(Note, str(note_id))
+        note_access(db, note, user)
+        if note.deleted:
+            raise HTTPException(404, 'Attachment not found')
+        item = db.get(Attachment, str(attachment_id))
+        if item is None or item.note_id != str(note_id):
+            raise HTTPException(404, 'Attachment not found')
+        return Response(item.data, media_type='application/octet-stream', headers={
+            'Content-Disposition': 'attachment', 'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'no-store', 'X-Content-SHA256': item.sha256})
+
+    @app.delete('/notes/{note_id}/attachments/{attachment_id}', status_code=204)
+    def delete_attachment(note_id: uuid.UUID, attachment_id: uuid.UUID, db: DB, user: Current):
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+        note = db.get(Note, str(note_id))
+        if note is not None and note.family_id:
+            lock_family(db, note.family_id)
+        note_access(db, note, user)
+        item = db.get(Attachment, str(attachment_id))
+        if item is None:
+            return Response(status_code=204)
+        if item.note_id != str(note_id):
+            raise HTTPException(404, 'Attachment not found')
+        db.delete(item)
+        db.execute(update(Note).where(Note.id == note.id).values(version=Note.version + 1, updated_at=now()))
+        db.commit()
+        return Response(status_code=204)
+
     @app.get('/notes/{note_id}')
     def get_note(note_id: uuid.UUID, db: DB, user: Current):
         note = db.get(Note, str(note_id))
         note_access(db, note, user)
-        return public_note(note)
+        return public_note(note, db)
 
     @app.post('/sync/snapshots', status_code=201)
     def snapshot(db: DB, user: Current):
@@ -362,12 +468,17 @@ def create_app(database_url: str | None = None):
         if count >= 3:
             raise HTTPException(429, 'Too many active snapshots; release one or wait 10 minutes')
         scopes = sorted(db.scalars(select(Member.family_id).where(Member.user_id == user.id)))
+        # Uploads and family note mutations take the same locks. Keep note version
+        # and attachment metadata consistent across the multiple SELECTs below.
+        # Sorted order prevents snapshots of overlapping families deadlocking.
+        for family_id in scopes:
+            lock_family(db, family_id)
         accessible = ((Note.owner_id == user.id) & Note.family_id.is_(None)) | Note.family_id.in_(scopes)
-        # One SELECT freezes a consistent set of rows; no offset over live data.
+        # Writers are fenced by the user/family locks until this snapshot commits.
         rows = list(db.scalars(select(Note).where(accessible).order_by(Note.id).limit(1001)))
         if len(rows) > 1000:
             raise HTTPException(413, 'Snapshot note limit reached; incremental sync is required')
-        frozen = [public_note(n) for n in rows]
+        frozen = [public_note(n, db) for n in rows]
         if len(json.dumps(frozen).encode()) > 8 * 1024 * 1024:
             raise HTTPException(413, 'Snapshot byte limit reached')
         snap = SyncSnapshot(id=str(uuid.uuid4()), user_id=user.id,
@@ -462,6 +573,7 @@ def create_app(database_url: str | None = None):
             deleted=1, payload={}, version=Note.version + 1, updated_at=now()))
         if changed.rowcount != 1:
             raise HTTPException(409, 'Version conflict; fetch remote state')
+        db.execute(delete(Attachment).where(Attachment.note_id == note.id))
         db.refresh(note)
         return finish_mutation(db, user, idempotency_key, fingerprint, note)
 

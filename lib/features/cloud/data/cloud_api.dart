@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -58,6 +59,30 @@ class CloudApi {
       throw CloudApiException(response.statusCode, message);
     }
     return response.body.isEmpty ? null : jsonDecode(utf8.decode(response.bodyBytes));
+  }
+
+  Future<Uint8List> binary(String method, String path,
+      {Uint8List? bytes, String? name}) async {
+    final request = http.Request(method, origin.resolve(path));
+    request.followRedirects = false;
+    request.headers['Authorization'] = 'Bearer $token';
+    request.headers['Content-Type'] = 'application/octet-stream';
+    if (name != null) request.headers['X-Filename'] = Uri.encodeComponent(name);
+    if (bytes != null) request.bodyBytes = bytes;
+    final response = await client.send(request).timeout(const Duration(seconds: 30));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.drain<void>().timeout(const Duration(seconds: 30));
+      throw CloudApiException(response.statusCode,
+        'Вложение не передано (${response.statusCode}). Проверьте доступ, тип файла и квоту.');
+    }
+    final data = BytesBuilder(copy: false);
+    await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
+      if (data.length + chunk.length > 5 * 1024 * 1024) {
+        throw StateError('Ответ сервера превышает лимит вложения.');
+      }
+      data.add(chunk);
+    }
+    return data.takeBytes();
   }
 
   void close() => client.close();

@@ -5,6 +5,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app/app.dart';
+import 'features/cloud/data/cloud_background.dart';
 import 'app/providers.dart';
 import 'core/services/json_store.dart';
 import 'core/services/notification_service.dart';
@@ -41,6 +42,12 @@ Future<void> main() async {
   container.listen(notesNotifierProvider, (_, next) {
     next.whenData((_) => container.read(notesNotifierProvider.notifier).rescheduleAll());
   }, fireImmediately: true);
+
+  try {
+    await CloudBackground.initialize();
+  } catch (error) {
+    debugPrint('Фоновый планировщик недоступен; локальные заметки продолжают работать.');
+  }
 
   // Deep links семейных приглашений.
   await container.read(deepLinkServiceProvider).start();
