@@ -30,7 +30,10 @@ class NotesRepository {
 
   /// Перепланировать все будущие напоминания (вызывается при старте приложения).
   Future<void> rescheduleAll(List<AppNote> notes) async {
-    await notifications.cancelAll();
+    // Do not cancel alarms belonging to the separate cloud workspace.
+    for (final note in notes) {
+      await notifications.cancel(note.id.hashCode);
+    }
     for (final note in notes) {
       if (note.reminderAt != null &&
           note.reminderAt!.isAfter(DateTime.now()) &&

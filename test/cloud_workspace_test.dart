@@ -149,4 +149,58 @@ void main() {
     api.close();
   });
 
+  test('Family scope and reminder survive queued create and edit', () async {
+    final api = CloudApi('https://example.com');
+    final workspace = CloudWorkspace(api, emptyState(), (_) async {});
+    final when = DateTime.utc(2030, 1, 1, 14);
+    await workspace.create('Общее дело', familyId: 'family-1', reminder: when);
+    final id = workspace.notes.keys.single;
+    expect(workspace.notes[id]['operation']['body']['family_id'], 'family-1');
+    expect(workspace.notes[id]['operation']['body']['reminder_at'], when.toIso8601String());
+    final serverNote = Map<String, dynamic>.from(workspace.notes[id]['note'] as Map);
+    serverNote['version'] = 2;
+    final confirmed = CloudWorkspace(api, {'notes': <String, dynamic>{
+      id: {'note': serverNote},
+    }}, (_) async {});
+    await confirmed.edit(id, 'Правка участника');
+    expect(confirmed.notes[id]['operation']['body']['family_id'], 'family-1');
+    expect(confirmed.notes[id]['operation']['body']['reminder_at'], when.toIso8601String());
+    api.close();
+  });
+
+  test('Reminder removal is an explicit null mutation', () async {
+    final api = CloudApi('https://example.com');
+    final workspace = CloudWorkspace(api, {'notes': <String, dynamic>{
+      'n': {'note': {'id': 'n', 'text': 'Текст', 'version': 3,
+        'family_id': 'f', 'reminder_at': '2030-01-01T12:00:00Z'}},
+    }}, (_) async {});
+    await workspace.setReminder('n', null);
+    final body = workspace.notes['n']['operation']['body'] as Map;
+    expect(body.containsKey('reminder_at'), isTrue);
+    expect(body['reminder_at'], isNull);
+    expect(body['family_id'], 'f');
+    api.close();
+  });
+
+  test('Revoked family write becomes a private blocked draft and sync continues', () async {
+    final api = CloudApi('https://example.com', client: MockClient((request) async {
+      if (request.method == 'PUT') return http.Response('{}', 404);
+      if (request.method == 'POST') return http.Response(jsonEncode({
+        'snapshot_id': 's', 'total': 0, 'family_ids': [],
+      }), 201);
+      if (request.method == 'DELETE') return http.Response('', 204);
+      return http.Response(jsonEncode({'snapshot_id': 's', 'total': 0,
+        'family_ids': [], 'notes': [], 'next_offset': null}), 200);
+    }));
+    final workspace = CloudWorkspace(api, emptyState(), (_) async {});
+    await workspace.create('Не потерять правку', familyId: 'f');
+    final id = workspace.notes.keys.single;
+    await workspace.sync();
+    expect(workspace.notes[id]['note']['text'], 'Не потерять правку');
+    expect(workspace.notes[id]['note']['family_id'], isNull);
+    expect(workspace.notes[id]['operation'], isNull);
+    expect(workspace.notes[id]['blocked'], isNotNull);
+    api.close();
+  });
+
 }

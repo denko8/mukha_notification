@@ -93,4 +93,11 @@ void main() {
     );
     expect(notifications.scheduled, isEmpty);
   });
+  test('rescheduling local notes does not cancel cloud alarms', () async {
+    await notifications.schedule(id: -1, title: 'Cloud', body: 'Cloud note',
+      when: DateTime.now().add(const Duration(days: 1)));
+    await repo.rescheduleAll([]);
+    expect(notifications.scheduled, hasLength(1));
+  });
+
 }

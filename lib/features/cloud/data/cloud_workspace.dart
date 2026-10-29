@@ -23,12 +23,27 @@ class CloudWorkspace {
     return next;
   }
 
-  Future<void> create(String text) => _serial(() => _create(text));
+  Future<void> create(String text, {String? familyId, DateTime? reminder}) =>
+      _serial(() => _create(text, familyId: familyId, reminder: reminder));
   Future<void> edit(String id, String text, {bool delete = false}) =>
       _serial(() => _edit(id, text, delete: delete));
   Future<void> resolve(String id, {required bool keepLocal}) =>
       _serial(() => _resolve(id, keepLocal: keepLocal));
   Future<void> sync() => _serial(_sync);
+  Future<void> setReminder(String id, DateTime? reminder) => _serial(() async {
+    final entry = notes[id] as Map;
+    if (entry['operation'] != null || entry['blocked'] != null) throw StateError('Сначала отправьте предыдущую правку.');
+    final note = Map<String, dynamic>.from(entry['note'] as Map);
+    final date = reminder?.toUtc().toIso8601String();
+    await _commit({'notes': {...notes, id: {
+      'note': {...note, 'reminder_at': date},
+      'operation': {'id': const Uuid().v4(), 'method': 'PUT', 'body': {
+        'expected_version': note['version'], 'text': note['text'],
+        'family_id': note['family_id'], 'done': note['done'] ?? false,
+        'category': note['category'] ?? 'general', 'reminder_at': date,
+      }},
+    }}});
+  });
 
   void _validateText(String text) {
     if (text.trim().isEmpty || text.length > 20000) {
@@ -36,13 +51,14 @@ class CloudWorkspace {
     }
   }
 
-  Future<void> _create(String text) async {
+  Future<void> _create(String text, {String? familyId, DateTime? reminder}) async {
     _validateText(text);
     final id = const Uuid().v4();
     await _commit({'notes': {...notes, id: {
-      'note': {'id': id, 'text': text.trim(), 'version': 0, 'family_id': null, 'deleted': false},
+      'note': {'id': id, 'text': text.trim(), 'version': 0, 'family_id': familyId, 'reminder_at': reminder?.toUtc().toIso8601String(), 'deleted': false},
       'operation': {'id': const Uuid().v4(), 'method': 'PUT',
-        'body': {'expected_version': 0, 'text': text.trim(), 'family_id': null}},
+        'body': {'expected_version': 0, 'text': text.trim(), 'family_id': familyId,
+          'reminder_at': reminder?.toUtc().toIso8601String()}},
     }}});
   }
 
@@ -50,12 +66,12 @@ class CloudWorkspace {
     if (!delete) _validateText(text);
     final entry = Map<String, dynamic>.from(notes[id] as Map);
     final note = Map<String, dynamic>.from(entry['note'] as Map);
-    if (entry['operation'] != null || note['family_id'] != null) {
-      throw StateError('Сначала синхронизируйте заметку. Семейные записи пока доступны только для чтения.');
+    if (entry['operation'] != null || entry['blocked'] != null) {
+      throw StateError('Сначала синхронизируйте предыдущую правку заметки.');
     }
     final body = delete ? <String, dynamic>{'expected_version': note['version']}
         : <String, dynamic>{'expected_version': note['version'], 'text': text.trim(),
-          'family_id': null, 'done': note['done'] ?? false,
+          'family_id': note['family_id'], 'done': note['done'] ?? false,
           'category': note['category'] ?? 'general', 'reminder_at': note['reminder_at']};
     await _commit({'notes': {...notes, id: {
       'note': {...note, 'text': text.trim(), 'deleted': delete},
@@ -94,6 +110,14 @@ class CloudWorkspace {
         // Only this operation is acknowledged, after successful local persistence.
         await _commit({'notes': {...notes, id: {'note': result}}});
       } on CloudApiException catch (e) {
+        if (e.status == 404 && (entry['note'] as Map)['family_id'] != null) {
+          final note = Map<String, dynamic>.from(entry['note'] as Map);
+          await _commit({...state, 'notes': {...notes, id: {
+            'note': {...note, 'family_id': null},
+            'blocked': 'Семейный доступ отозван. Текст сохранён как черновик, не отправлен.',
+          }}});
+          continue;
+        }
         if (e.status != 409) rethrow;
         final remote = await api.request('GET', '/notes/$id');
         await _commit({'notes': {...notes, id: {...entry, 'conflict': remote}}});
@@ -126,7 +150,7 @@ class CloudWorkspace {
         final note = entry['note'] as Map;
         final familyId = note['family_id'];
         if (familyId != null && !scopes.contains(familyId)) continue;
-        if (entry['operation'] != null ||
+        if (entry['operation'] != null || entry['blocked'] != null ||
             (staged[id] != null && (note['version'] as int) >
               (staged[id]['note']['version'] as int))) {
           staged[id] = entry;

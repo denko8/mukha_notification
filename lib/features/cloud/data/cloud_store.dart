@@ -11,11 +11,18 @@ class CloudStore {
 
   static Future<CloudStore> open(String namespace) async {
     final db = await openDatabase(p.join(await getDatabasesPath(), 'cloud_v1.db'),
-      version: 1, onCreate: (db, _) async {
+      version: 2, onCreate: (db, _) async {
         await db.execute('CREATE TABLE workspaces (namespace TEXT PRIMARY KEY, document TEXT NOT NULL)');
+        await _alarms(db);
+      }, onUpgrade: (db, old, next) async {
+        if (old < 2) await _alarms(db);
       });
     return CloudStore(db, namespace);
   }
+
+  static Future<void> _alarms(Database db) => db.execute(
+    'CREATE TABLE cloud_alarms (notification_id INTEGER PRIMARY KEY AUTOINCREMENT, '
+    'namespace TEXT NOT NULL, note_id TEXT NOT NULL, UNIQUE(namespace,note_id))');
 
   Future<Map<String, dynamic>> read() async {
     final rows = await database.query('workspaces', where: 'namespace = ?', whereArgs: [namespace]);
