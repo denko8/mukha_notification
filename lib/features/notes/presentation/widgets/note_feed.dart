@@ -11,6 +11,8 @@ import 'note_card.dart';
 class NoteFeed extends ConsumerWidget {
   final List<AppNote> notes;
   final bool showAuthor;
+  final String? emptyText;
+  final VoidCallback? onResetFilters;
   final void Function(AppNote note) onOpen;
 
   const NoteFeed({
@@ -18,6 +20,8 @@ class NoteFeed extends ConsumerWidget {
     required this.notes,
     required this.onOpen,
     this.showAuthor = false,
+    this.emptyText,
+    this.onResetFilters,
   });
 
   @override
@@ -25,14 +29,16 @@ class NoteFeed extends ConsumerWidget {
     if (notes.isEmpty) {
       return _EmptyState(
         icon: Icons.note_alt_outlined,
-        text: showAuthor
-            ? 'В семье пока нет общих заметок.\nДобавьте первую ниже.'
-            : 'Пока пусто. О чём напомнить?',
+        onResetFilters: onResetFilters,
+        text: emptyText ?? (showAuthor
+            ? 'Здесь будут семейные заметки.\nДобавьте первую в поле выше.'
+            : 'Здесь будут ваши заметки.\nНапишите выше, например: «Забрать заказ завтра в 14:00».'),
       );
     }
 
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       itemCount: notes.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, i) {
@@ -42,7 +48,9 @@ class NoteFeed extends ConsumerWidget {
           key: ValueKey('slide_${note.id}'),
           child: TweenAnimationBuilder<double>(
             tween: Tween(begin: 0, end: 1),
-            duration: const Duration(milliseconds: 300),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
             builder: (context, value, child) => Opacity(
               opacity: value,
@@ -111,8 +119,13 @@ class NoteFeed extends ConsumerWidget {
 class _EmptyState extends StatelessWidget {
   final IconData icon;
   final String text;
+  final VoidCallback? onResetFilters;
 
-  const _EmptyState({required this.icon, required this.text});
+  const _EmptyState({
+    required this.icon,
+    required this.text,
+    this.onResetFilters,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +148,14 @@ class _EmptyState extends StatelessWidget {
                     ?.copyWith(color: theme.textTheme.bodySmall?.color),
               ),
             ),
+            if (onResetFilters != null) ...[
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: onResetFilters,
+                icon: const Icon(Icons.filter_alt_off_outlined),
+                label: const Text('Сбросить поиск и фильтры'),
+              ),
+            ],
           ],
         ),
       ),

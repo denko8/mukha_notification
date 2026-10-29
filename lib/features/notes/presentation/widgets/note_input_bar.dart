@@ -52,6 +52,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
   String? _manualCategoryKey;
   late bool _isFamily = widget.forceFamily;
   bool _listening = false;
+  bool _saving = false;
   // Движок готовит модель/распознаватель (1–3 сек) — показываем
   // спиннер вместо иконки, чтобы нажатие не выглядело «мёртвым».
   bool _voiceBusy = false;
@@ -124,6 +125,29 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
       NoteClassifier.classifyKey(_controller.text, settings.customCategories);
 
   Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      await _saveDraft();
+    } catch (error, stack) {
+      debugPrint('Ошибка сохранения заметки: $error\n$stack');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось завершить сохранение. Текст оставлен в поле. '
+            'Перед повторной отправкой проверьте ленту: заметка могла сохраниться, '
+            'но напоминание не установиться.',
+          ),
+          duration: Duration(seconds: 8),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _saveDraft() async {
     final text = _controller.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -150,8 +174,7 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
         );
 
     // Звук "тинь" + тактильный отклик (кастомный ассет подключим в v1.1).
-    await SystemSound.play(SystemSoundType.alert);
-    await HapticFeedback.mediumImpact();
+    unawaited(_playSaveFeedback());
     if (!mounted) return;
 
     _controller.clear();
@@ -171,6 +194,15 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
     // Действует и для ручной отправки, и для авто-сохранения голосом —
     // оба пути сохраняются через _save().
     _focusNode.unfocus();
+  }
+
+  Future<void> _playSaveFeedback() async {
+    try {
+      await SystemSound.play(SystemSoundType.alert);
+      await HapticFeedback.mediumImpact();
+    } catch (error) {
+      debugPrint('Отклик после сохранения недоступен: $error');
+    }
   }
 
   Future<void> _toggleVoice() async {
@@ -526,258 +558,268 @@ class _NoteInputBarState extends ConsumerState<NoteInputBar>
     final categoryKey = _suggestedCategoryKey(settings);
     final aiActive = AiClientFactory.isConfigured(settings);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppColors.radiusCard),
-          boxShadow: const [
-            BoxShadow(color: AppColors.shadow, blurRadius: 8, offset: Offset(0, 2)),
-          ],
-        ),
-        child: Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: _controller,
-                  focusNode: _focusNode,
-                  minLines: 1,
-                  maxLines: 4,
-                  style: theme.textTheme.bodyLarge,
-                  decoration: const InputDecoration(
-                    hintText: 'О чем напомнить?',
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    filled: false,
+    return AbsorbPointer(
+      absorbing: _saving,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppColors.radiusCard),
+            boxShadow: const [
+              BoxShadow(color: AppColors.shadow, blurRadius: 8, offset: Offset(0, 2)),
+            ],
+          ),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    readOnly: _saving,
+                    controller: _controller,
+                    focusNode: _focusNode,
+                    minLines: 1,
+                    maxLines: 4,
+                    style: theme.textTheme.bodyLarge,
+                    decoration: const InputDecoration(
+                      hintText: 'О чем напомнить?',
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      filled: false,
+                    ),
                   ),
-                ),
-                if (_controller.text.isNotEmpty && _parsed.spans.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, top: 4),
-                    child: Text.rich(
-                      buildHighlightedSpan(
-                        _controller.text,
-                        _parsed.spans,
-                        baseStyle: theme.textTheme.bodySmall!,
+                  if (_controller.text.isNotEmpty && _parsed.spans.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 4),
+                      child: Text.rich(
+                        buildHighlightedSpan(
+                          _controller.text,
+                          _parsed.spans,
+                          baseStyle: theme.textTheme.bodySmall!,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                if (aiActive)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, top: 6),
-                    child: Row(
-                      children: [
-                         Icon(Icons.auto_awesome,
-                            size: 14, color: AppColors.gold),
-                        const SizedBox(width: 4),
-                        Text(
-                          'ИИ-распознавание активно',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: AppColors.gold),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (_controller.text.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, top: 6),
-                    child: Row(
-                      children: [
-                        Icon(catalog.iconOf(categoryKey),
-                            size: 15, color: AppColors.gold),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Категория: ${catalog.labelOf(categoryKey)}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: AppColors.gold),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (reminder != null)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4, top: 6),
-                    child: Row(
-                      children: [
-                        Icon(Icons.alarm, size: 15, color: AppColors.gold),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Напомню: ${DateFormatter.reminder(reminder)}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: AppColors.gold),
-                        ),
-                        const SizedBox(width: 4),
-                        GestureDetector(
-                          onTap: () => setState(() => _manualReminder = null),
-                          child: const Icon(Icons.close, size: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (_attachments.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        for (final a in _attachments)
-                          Chip(
-                            label: Text(a.name, overflow: TextOverflow.ellipsis),
-                            visualDensity: VisualDensity.compact,
-                            onDeleted: () =>
-                                setState(() => _attachments.remove(a)),
+                  if (aiActive)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 6),
+                      child: Row(
+                        children: [
+                           Icon(Icons.auto_awesome,
+                              size: 14, color: AppColors.gold),
+                          const SizedBox(width: 4),
+                          Text(
+                            'ИИ-распознавание активно',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: AppColors.gold),
                           ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                if (_listening)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                    child: Row(
-                      children: [
-                        FadeTransition(
-                          opacity: _pulse,
-                          child: const Icon(
-                            Icons.fiber_manual_record,
-                            size: 12,
-                            color: AppColors.danger,
+                  if (_controller.text.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 6),
+                      child: Row(
+                        children: [
+                          Icon(catalog.iconOf(categoryKey),
+                              size: 15, color: AppColors.gold),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Категория: ${catalog.labelOf(categoryKey)}',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: AppColors.gold),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Идёт запись. Пауза 3 секунды — заметка '
-                            'сохранится сама, микрофон выключится.',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                const Divider(height: 16),
-                Row(
-                  children: [
-                    IconButton(
-                      tooltip: 'Голосовой ввод',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                          minWidth: 40, minHeight: 40),
-                      padding: const EdgeInsets.all(6),
-                      icon: _voiceBusy
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              _listening ? Icons.mic : Icons.mic_none,
-                              color: _listening ? AppColors.danger : null,
+                  if (reminder != null)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 6),
+                      child: Row(
+                        children: [
+                          Icon(Icons.alarm, size: 15, color: AppColors.gold),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Напомню: ${DateFormatter.reminder(reminder)}',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: AppColors.gold),
+                          ),
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () => setState(() => _manualReminder = null),
+                            child: const Icon(Icons.close, size: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_attachments.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final a in _attachments)
+                            Chip(
+                              label: Text(a.name, overflow: TextOverflow.ellipsis),
+                              visualDensity: VisualDensity.compact,
+                              onDeleted: () =>
+                                  setState(() => _attachments.remove(a)),
                             ),
-                      onPressed:
-                          _voiceBusy ? null : _toggleVoice,
+                        ],
+                      ),
                     ),
-                    IconButton(
-                      tooltip: 'Прикрепить файл',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                          minWidth: 40, minHeight: 40),
-                      padding: const EdgeInsets.all(6),
-                      icon: const Icon(Icons.attach_file),
-                      color: theme.colorScheme.onSurface,
-                      onPressed: _showAttachSheet,
+                  if (_listening)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Row(
+                        children: [
+                          FadeTransition(
+                            opacity: _pulse,
+                            child: const Icon(
+                              Icons.fiber_manual_record,
+                              size: 12,
+                              color: AppColors.danger,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Идёт запись. Пауза 3 секунды — заметка '
+                              'сохранится сама, микрофон выключится.',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    IconButton(
-                      tooltip: 'Опции',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                          minWidth: 40, minHeight: 40),
-                      padding: const EdgeInsets.all(6),
-                      icon: const Icon(Icons.add_circle_outline),
-                      color: theme.colorScheme.onSurface,
-                      onPressed: _showOptions,
-                    ),
-                    if (widget.showFamilyToggle) ...[
-                      // Flexible занимает всё место после кнопок, а
-                      // FittedBox(scaleDown) ужимает содержимое, если оно
-                      // не влезает: RenderFlex overflow на узких экранах
-                      // исключён в принципе.
-                      Flexible(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerRight,
-                          child: Tooltip(
-                            message:
-                                'Включите, чтобы заметку видели все члены семьи',
-                            child: GestureDetector(
-                              // Тап по иконке/подписи тоже переключает —
-                              // удобнее, чем попадать в маленький Switch.
-                              onTap: widget.forceFamily
-                                  ? null
-                                  : () => setState(
-                                      () => _isFamily = !_isFamily),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.groups_outlined,
-                                    size: 16,
-                                    color: _isFamily
-                                        ? AppColors.gold
-                                        : theme.colorScheme.onSurface
-                                            .withValues(alpha: 0.65),
-                                  ),
-                                  const SizedBox(width: 3),
-                                  // Внутри FittedBox ширина не ограничена,
-                                  // поэтому softWrap:false вместо Flexible.
-                                  Text(
-                                    'Семейная',
-                                    softWrap: false,
-                                    style:
-                                        theme.textTheme.bodySmall?.copyWith(
-                                      fontWeight: _isFamily
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
-                                      color:
-                                          _isFamily ? AppColors.gold : null,
+                  const Divider(height: 16),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Голосовой ввод',
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                            minWidth: 40, minHeight: 40),
+                        padding: const EdgeInsets.all(6),
+                        icon: _voiceBusy
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(
+                                _listening ? Icons.mic : Icons.mic_none,
+                                color: _listening ? AppColors.danger : null,
+                              ),
+                        onPressed:
+                            _voiceBusy ? null : _toggleVoice,
+                      ),
+                      IconButton(
+                        tooltip: 'Прикрепить файл',
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                            minWidth: 40, minHeight: 40),
+                        padding: const EdgeInsets.all(6),
+                        icon: const Icon(Icons.attach_file),
+                        color: theme.colorScheme.onSurface,
+                        onPressed: _showAttachSheet,
+                      ),
+                      IconButton(
+                        tooltip: 'Опции',
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                            minWidth: 40, minHeight: 40),
+                        padding: const EdgeInsets.all(6),
+                        icon: const Icon(Icons.add_circle_outline),
+                        color: theme.colorScheme.onSurface,
+                        onPressed: _showOptions,
+                      ),
+                      if (widget.showFamilyToggle) ...[
+                        // Flexible занимает всё место после кнопок, а
+                        // FittedBox(scaleDown) ужимает содержимое, если оно
+                        // не влезает: RenderFlex overflow на узких экранах
+                        // исключён в принципе.
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Tooltip(
+                              message:
+                                  'Сохранить в раздел «Семья» на этом устройстве. Обмен между телефонами пока недоступен',
+                              child: GestureDetector(
+                                // Тап по иконке/подписи тоже переключает —
+                                // удобнее, чем попадать в маленький Switch.
+                                onTap: widget.forceFamily
+                                    ? null
+                                    : () => setState(
+                                        () => _isFamily = !_isFamily),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.groups_outlined,
+                                      size: 16,
+                                      color: _isFamily
+                                          ? AppColors.gold
+                                          : theme.colorScheme.onSurface
+                                              .withValues(alpha: 0.65),
                                     ),
-                                  ),
-                                  Switch(
-                                    value: _isFamily,
-                                    materialTapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    onChanged: widget.forceFamily
-                                        ? null
-                                        : (v) =>
-                                            setState(() => _isFamily = v),
-                                  ),
-                                ],
+                                    const SizedBox(width: 3),
+                                    // Внутри FittedBox ширина не ограничена,
+                                    // поэтому softWrap:false вместо Flexible.
+                                    Text(
+                                      'Семейная',
+                                      softWrap: false,
+                                      style:
+                                          theme.textTheme.bodySmall?.copyWith(
+                                        fontWeight: _isFamily
+                                            ? FontWeight.w600
+                                            : FontWeight.normal,
+                                        color:
+                                            _isFamily ? AppColors.gold : null,
+                                      ),
+                                    ),
+                                    Switch(
+                                      value: _isFamily,
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      onChanged: widget.forceFamily
+                                          ? null
+                                          : (v) =>
+                                              setState(() => _isFamily = v),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
+                      ] else
+                        const Spacer(),
+                      IconButton(
+                        tooltip: _saving ? 'Сохраняем…' : 'Сохранить',
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints(
+                            minWidth: 40, minHeight: 40),
+                        padding: const EdgeInsets.all(6),
+                        icon: _saving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(Icons.send, color: AppColors.gold),
+                        onPressed: _saving ? null : _save,
                       ),
-                    ] else
-                      const Spacer(),
-                    IconButton(
-                      tooltip: 'Сохранить',
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(
-                          minWidth: 40, minHeight: 40),
-                      padding: const EdgeInsets.all(6),
-                      icon: Icon(Icons.send, color: AppColors.gold),
-                      onPressed: _save,
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

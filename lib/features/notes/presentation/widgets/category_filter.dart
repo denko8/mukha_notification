@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/providers.dart';
-import '../../../../core/theme/app_colors.dart';
 import '../../../settings/models/app_settings.dart';
 import '../../utils/category_catalog.dart';
 
@@ -25,7 +24,7 @@ class CategoryFilter extends ConsumerWidget {
     final catalog = CategoryCatalog(settings.customCategories);
 
     return SizedBox(
-      height: 44,
+      height: 48.0 + (MediaQuery.textScalerOf(context).scale(13) - 13).clamp(0, 52).toDouble(),
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -66,35 +65,13 @@ class _FilterChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.gold : Theme.of(context).cardTheme.color,
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: const [
-              BoxShadow(color: AppColors.shadow, blurRadius: 6, offset: Offset(0, 2)),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            children: [
-              Icon(icon,
-                  size: 16,
-                  color: selected ? Colors.white : AppColors.gold),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: selected ? Colors.white : null,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-        ),
+      child: ChoiceChip(
+        label: Text(label),
+        avatar: Icon(icon, size: 18),
+        selected: selected,
+        showCheckmark: false,
+        onSelected: (_) => onTap(),
+        materialTapTargetSize: MaterialTapTargetSize.padded,
       ),
     );
   }

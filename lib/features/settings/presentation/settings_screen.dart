@@ -505,61 +505,19 @@ class _Section extends StatelessWidget {
   }
 }
 
-class _SyncSection extends ConsumerStatefulWidget {
-  @override
-  ConsumerState<_SyncSection> createState() => _SyncSectionState();
-}
-
-class _SyncSectionState extends ConsumerState<_SyncSection> {
-  bool _syncing = false;
-
+class _SyncSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final sync = ref.watch(syncServiceProvider);
     return _Section(
-      title: 'Синхронизация',
-      child: Column(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.cloud_outlined),
-            title: Text(_syncing ? 'Синхронизируется…' : 'Синхронизировано'),
-            subtitle: Text(sync.lastSyncAt != null
-                ? 'Последняя: ${sync.lastSyncAt!.toLocal().toString().substring(0, 16)}'
-                : 'Ещё не выполнялась'),
-            trailing: _syncing
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : Icon(Icons.check_circle, color: AppColors.success),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.sync),
-                    label: const Text('Синхронизировать сейчас'),
-                    onPressed: _syncing
-                        ? null
-                        : () async {
-                            setState(() => _syncing = true);
-                            // Полный цикл: имитация облачной отправки +
-                            // снятие флага pendingSync у всех заметок.
-                            await ref.read(notesNotifierProvider.notifier).syncNow();
-                            if (mounted) setState(() => _syncing = false);
-                          },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+      title: 'Хранение данных',
+      child: const ListTile(
+        leading: Icon(Icons.phone_android_outlined),
+        title: Text('Только на этом устройстве'),
+        subtitle: Text(
+          'Заметки доступны без интернета. Облачная синхронизация '
+          'пока не подключена: другие устройства их не получат. '
+          'Перед удалением приложения сохраните важные заметки через «Поделиться» или PDF.',
+        ),
       ),
     );
   }

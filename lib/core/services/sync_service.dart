@@ -3,8 +3,7 @@ enum SyncStatus { idle, syncing, synced, offline, error }
 
 /// Интерфейс облачной синхронизации.
 ///
-/// В MVP реализована локальная заглушка [LocalSyncService], которая
-/// помечает заметки как синхронизированные. Боевой `FirebaseSyncService`
+/// Пока backend не подключён, [LocalSyncService] явно сообщает об этом. Боевой `FirebaseSyncService`
 /// (Realtime Database + Security Rules) реализуется по docs/BACKEND_SETUP.md
 /// и подменяет провайдер без изменения UI.
 abstract class SyncService {
@@ -13,17 +12,18 @@ abstract class SyncService {
   Future<void> syncNow();
 }
 
+/// Облачный backend ещё не подключён. Не имитирует отправку данных.
 class LocalSyncService implements SyncService {
   @override
-  SyncStatus status = SyncStatus.synced;
+  SyncStatus get status => SyncStatus.offline;
+
   @override
-  DateTime? lastSyncAt = DateTime.now();
+  DateTime? get lastSyncAt => null;
 
   @override
   Future<void> syncNow() async {
-    status = SyncStatus.syncing;
-    await Future<void>.delayed(const Duration(milliseconds: 800));
-    lastSyncAt = DateTime.now();
-    status = SyncStatus.synced;
+    throw UnsupportedError(
+      'Облачная синхронизация пока не подключена. Заметки хранятся на устройстве.',
+    );
   }
 }

@@ -63,19 +63,13 @@ class NoteCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (onToggleDone != null)
-                      GestureDetector(
-                        onTap: onToggleDone,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 2, right: 10),
-                          child: Icon(
-                            note.done
-                                ? Icons.check_circle
-                                : Icons.radio_button_unchecked,
-                            color: note.done
-                                ? AppColors.success
-                                : AppColors.gold,
-                            size: 22,
-                          ),
+                      IconButton(
+                        tooltip: note.done ? 'Вернуть в дела' : 'Отметить выполненным',
+                        onPressed: onToggleDone,
+                        icon: Icon(
+                          note.done ? Icons.check_circle : Icons.radio_button_unchecked,
+                          color: note.done ? AppColors.success : AppColors.gold,
+                          size: 22,
                         ),
                       ),
                     Expanded(
@@ -95,8 +89,18 @@ class NoteCard extends ConsumerWidget {
                       iconSize: 19,
                       icon: const Icon(Icons.ios_share),
                       color: AppColors.gold,
-                      onPressed: () =>
-                          ref.read(shareServiceProvider).shareNote(note),
+                      onPressed: () async {
+                        try {
+                          await ref.read(shareServiceProvider).shareNote(note);
+                        } catch (error) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text(
+                              'Не удалось открыть «Поделиться». Попробуйте ещё раз.',
+                            )),
+                          );
+                        }
+                      },
                     ),
                   ],
                 ),
@@ -130,7 +134,7 @@ class NoteCard extends ConsumerWidget {
                         label: note.authorName,
                       ),
                     if (note.pendingSync)
-                      const _Chip(icon: Icons.cloud_off, label: 'Офлайн'),
+                      const _Chip(icon: Icons.cloud_off, label: 'На устройстве'),
                   ],
                 ),
               ],

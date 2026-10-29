@@ -28,7 +28,7 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
       if (!mounted) return;
       showDialog(
         context: context,
-        builder: (_) => JoinInviteDialog(initialToken: token),
+        builder: (_) => const FamilyAccessInfoDialog(),
       );
     });
   }
@@ -78,7 +78,7 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
                 const Spacer(),
                 TextButton.icon(
                   icon: const Icon(Icons.person_add_alt, size: 17),
-                  label: const Text('Пригласить'),
+                  label: const Text('О доступе'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.gold,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -87,10 +87,17 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
                   ),
                   onPressed: () => showDialog(
                     context: context,
-                    builder: (_) => const InviteDialog(),
+                    builder: (_) => const FamilyAccessInfoDialog(),
                   ),
                 ),
               ],
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              'Семейные заметки пока хранятся только здесь. '
+              'Приглашения и общая доска между телефонами появятся после подключения облака.',
             ),
           ),
           if (members.isNotEmpty)
@@ -137,6 +144,11 @@ class _FamilyScreenState extends ConsumerState<FamilyScreen> {
           Expanded(
             child: NoteFeed(
               notes: familyNotes,
+              emptyText: authorFilter != null
+                  ? 'У этого участника пока нет заметок.'
+                  : null,
+              onResetFilters: authorFilter == null ? null : () =>
+                  ref.read(familyAuthorFilterProvider.notifier).state = null,
               showAuthor: true,
               onOpen: (note) => Navigator.of(context).push(
                 MaterialPageRoute(

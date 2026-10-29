@@ -195,3 +195,26 @@ class _JoinInviteDialogState extends ConsumerState<JoinInviteDialog> {
     );
   }
 }
+
+/// Честное объяснение вместо неработающего межустройственного приглашения.
+class FamilyAccessInfoDialog extends StatelessWidget {
+  const FamilyAccessInfoDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Семейный доступ пока локальный'),
+      content: const Text(
+        'Заметки в разделе «Семья» сохранены на этом устройстве. '
+        'Подключение других участников пока недоступно. '
+        'Чтобы передать заметку сейчас, откройте её и выберите «Поделиться».',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Понятно'),
+        ),
+      ],
+    );
+  }
+}
