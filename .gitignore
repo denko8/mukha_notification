@@ -21,3 +21,10 @@ coverage/
 
 # Platform folders are regenerated locally via `flutter create .`
 # android/, ios/, web/ etc. are intentionally not committed yet.
+
+# Backend secrets and development artifacts
+backend/.env
+backend/.venv/
+backend/.pytest_cache/
+backend/**/*.db
+__pycache__/
